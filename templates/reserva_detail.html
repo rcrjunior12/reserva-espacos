@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Detalhe da reserva{% endblock %}
+{% block content %}
+<div class="card p-3 p-lg-4 mx-auto" style="max-width: 640px;">
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <span class="badge-space" style="background:{{ reserva.space.color }}"></span>
+      <span class="fs-5 fw-semibold">{{ reserva.space.name }}</span>
+      {% if reserva.status == 'Confirmada' %}<span class="badge text-bg-success ms-2">Confirmada</span>
+      {% elif reserva.status == 'Pendente' %}<span class="badge text-bg-warning ms-2">Pendente</span>
+      {% else %}<span class="badge text-bg-secondary ms-2">Cancelada</span>{% endif %}
+    </div>
+    <a href="{{ url_for('reserva_editar', reserva_id=reserva.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> Editar</a>
+  </div>
+
+  <dl class="row mb-0">
+    <dt class="col-5 col-md-4 text-muted fw-normal">Data / horário</dt>
+    <dd class="col-7 col-md-8">{{ reserva.date }} • {{ reserva.start_time }} às {{ reserva.end_time }}</dd>
+
+    <dt class="col-5 col-md-4 text-muted fw-normal">Atividade</dt>
+    <dd class="col-7 col-md-8">{{ reserva.activity or '—' }}</dd>
+
+    <dt class="col-5 col-md-4 text-muted fw-normal">Responsável</dt>
+    <dd class="col-7 col-md-8">{{ reserva.requester_name }}</dd>
+
+    <dt class="col-5 col-md-4 text-muted fw-normal">Contato</dt>
+    <dd class="col-7 col-md-8">{{ reserva.requester_contact or '—' }}</dd>
+
+    <dt class="col-5 col-md-4 text-muted fw-normal">Ministério</dt>
+    <dd class="col-7 col-md-8">{{ reserva.ministry.name if reserva.ministry else '—' }}</dd>
+
+    <dt class="col-5 col-md-4 text-muted fw-normal">Pagamento</dt>
+    <dd class="col-7 col-md-8">
+      {% if reserva.is_paid %}
+        Pago • {{ reserva.payment_method or 'forma não informada' }} • R$ {{ '%.2f'|format(reserva.payment_value) }}
+        {% if reserva.payment_confirmed %}<span class="badge text-bg-success ms-1">Recebido</span>
+        {% else %}<span class="badge text-bg-warning ms-1">Pendente</span>{% endif %}
+      {% else %}
+        Gratuito
+      {% endif %}
+    </dd>
+
+    {% if reserva.is_paid %}
+    <dt class="col-5 col-md-4 text-muted fw-normal">Comprovante</dt>
+    <dd class="col-7 col-md-8">
+      {% if reserva.payment_proof_filename %}
+        <a href="{{ url_for('uploaded_file', filename=reserva.payment_proof_filename) }}" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-paperclip me-1"></i>Ver comprovante</a>
+      {% else %}
+        <span class="text-muted">Nenhum anexado</span>
+      {% endif %}
+    </dd>
+    {% endif %}
+
+    <dt class="col-5 col-md-4 text-muted fw-normal">Observações</dt>
+    <dd class="col-7 col-md-8">{{ reserva.notes or '—' }}</dd>
+
+    <dt class="col-5 col-md-4 text-muted fw-normal">Cadastrado por</dt>
+    <dd class="col-7 col-md-8">{{ reserva.created_by or '—' }} em {{ reserva.created_at.strftime('%d/%m/%Y %H:%M') }}</dd>
+  </dl>
+
+  <div class="d-flex gap-2 mt-3">
+    <a href="{{ url_for('reservas_list') }}" class="btn btn-outline-secondary">Voltar</a>
+    <form method="post" action="{{ url_for('reserva_excluir', reserva_id=reserva.id) }}" onsubmit="return confirm('Excluir esta reserva? Essa ação não pode ser desfeita.');" class="ms-auto">
+      <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash me-1"></i>Excluir</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

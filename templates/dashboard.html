@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Início{% endblock %}
+{% block content %}
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    <div class="stat-card-neutral">
+      <div class="stat-icon" style="background: var(--brand-light); color: var(--brand);"><i class="bi bi-geo-alt"></i></div>
+      <div>
+        <div class="small text-muted">Espaços ativos</div>
+        <div class="fs-3 fw-bold">{{ total_espacos }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="stat-card-neutral">
+      <div class="stat-icon" style="background: #eef0ef; color: var(--brand-charcoal);"><i class="bi bi-calendar-check"></i></div>
+      <div>
+        <div class="small text-muted">Reservas este mês</div>
+        <div class="fs-3 fw-bold">{{ total_reservas_mes }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="stat-card-neutral">
+      <div class="stat-icon" style="background: #f5efe3; color: var(--brand-gold);"><i class="bi bi-cash-coin"></i></div>
+      <div>
+        <div class="small text-muted">Pagamentos pendentes</div>
+        <div class="fs-3 fw-bold">{{ pendentes_pagamento|length }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <a href="{{ url_for('reserva_nova') }}" class="text-decoration-none">
+      <div class="stat-card-neutral" style="background: var(--brand); color: #fff;">
+        <div class="stat-icon" style="background: rgba(255,255,255,0.18); color: #fff;"><i class="bi bi-plus-lg"></i></div>
+        <div>
+          <div class="small" style="opacity:.85;">Nova reserva</div>
+          <div class="fs-6 fw-semibold">Cadastrar agora</div>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-calendar-event me-1"></i>Próximas reservas</h6>
+      {% if proximas %}
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead class="text-muted small">
+              <tr><th>Data</th><th>Espaço</th><th>Responsável</th><th>Ministério</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for r in proximas %}
+              <tr class="reserva-row" onclick="window.location='{{ url_for('reserva_detail', reserva_id=r.id) }}'" style="cursor:pointer;">
+                <td>{{ r.date }}<br><small class="text-muted">{{ r.start_time }}-{{ r.end_time }}</small></td>
+                <td><span class="badge-space" style="background:{{ r.space.color }}"></span>{{ r.space.name }}</td>
+                <td>{{ r.requester_name }}</td>
+                <td>{{ r.ministry.name if r.ministry else '—' }}</td>
+                <td>
+                  {% if r.status == 'Confirmada' %}<span class="badge text-bg-success">Confirmada</span>
+                  {% elif r.status == 'Pendente' %}<span class="badge text-bg-warning">Pendente</span>
+                  {% else %}<span class="badge text-bg-secondary">{{ r.status }}</span>{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted mb-0">Nenhuma reserva futura cadastrada.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-cash-coin me-1"></i>Pagamentos pendentes</h6>
+      {% if pendentes_pagamento %}
+        <ul class="list-group list-group-flush">
+          {% for r in pendentes_pagamento %}
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+            <div>
+              <a href="{{ url_for('reserva_detail', reserva_id=r.id) }}" class="text-decoration-none">{{ r.requester_name }}</a>
+              <div class="small text-muted">{{ r.space.name }} • {{ r.date }}</div>
+            </div>
+            <span class="badge text-bg-warning">R$ {{ '%.2f'|format(r.payment_value) }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-muted mb-0">Nenhum pagamento pendente.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

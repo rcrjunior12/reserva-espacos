@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+reservas.db
+uploads/*
+!uploads/.gitkeep
+.env
+venv/

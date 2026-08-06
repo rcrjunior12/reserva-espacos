@@ -1,0 +1,20 @@
+# Configuração de exemplo para deploy no Render.com (usar quando for para produção)
+# Requer um disco persistente para manter o banco SQLite e os comprovantes entre deploys.
+services:
+  - type: web
+    name: reserva-espacos
+    env: python
+    plan: starter          # o plano "starter" (pago) é necessário para ter disco persistente
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        value: sqlite:////var/data/reservas.db
+      - key: UPLOAD_FOLDER
+        value: /var/data/uploads
+    disk:
+      name: dados
+      mountPath: /var/data
+      sizeGB: 1

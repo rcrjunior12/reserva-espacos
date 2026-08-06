@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Reservas anteriores' if filters.get('historico') else 'Reservas' }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="fw-semibold mb-0">
+    {% if filters.get('historico') %}
+      <i class="bi bi-clock-history me-1"></i>Reservas anteriores
+    {% else %}
+      <i class="bi bi-list-check me-1"></i>Reservas
+    {% endif %}
+  </h5>
+  <a href="{{ url_for('reserva_nova') }}" class="btn btn-primary btn-sm d-none d-lg-inline-block"><i class="bi bi-plus-lg me-1"></i>Nova reserva</a>
+</div>
+{% if filters.get('historico') %}
+<p class="text-muted small mb-3">Mostrando reservas com data até ontem. <a href="{{ url_for('reservas_list') }}">Ver todas</a>.</p>
+{% endif %}
+
+<div class="card p-3 mb-3">
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-6 col-md-3">
+      <label class="form-label small mb-1">Espaço</label>
+      <select name="space_id" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        {% for s in spaces %}
+        <option value="{{ s.id }}" {% if filters.get('space_id') == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-md-3">
+      <label class="form-label small mb-1">Ministério</label>
+      <select name="ministry_id" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        {% for m in ministries %}
+        <option value="{{ m.id }}" {% if filters.get('ministry_id') == m.id|string %}selected{% endif %}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label small mb-1">Status</label>
+      <select name="status" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        {% for st in status_options %}
+        <option value="{{ st }}" {% if filters.get('status') == st %}selected{% endif %}>{{ st }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label small mb-1">De</label>
+      <input type="date" name="date_from" class="form-control form-control-sm" value="{{ filters.get('date_from','') }}">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label small mb-1">Até</label>
+      <input type="date" name="date_to" class="form-control form-control-sm" value="{{ filters.get('date_to','') }}">
+    </div>
+    <div class="col-12">
+      <button type="submit" class="btn btn-sm btn-outline-primary">Filtrar</button>
+      <a href="{{ url_for('reservas_list') }}" class="btn btn-sm btn-outline-secondary">Limpar</a>
+    </div>
+  </form>
+</div>
+
+<div class="card p-0">
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Data</th><th>Espaço</th><th>Responsável</th><th>Ministério</th><th>Pagamento</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in reservas %}
+        <tr class="reserva-row">
+          <td onclick="window.location='{{ url_for('reserva_detail', reserva_id=r.id) }}'" style="cursor:pointer;">
+            {{ r.date }}<br><small class="text-muted">{{ r.start_time }}-{{ r.end_time }}</small>
+          </td>
+          <td><span class="badge-space" style="background:{{ r.space.color }}"></span>{{ r.space.name }}</td>
+          <td>{{ r.requester_name }}</td>
+          <td>{{ r.ministry.name if r.ministry else '—' }}</td>
+          <td>
+            {% if r.is_paid %}
+              <span class="badge {{ 'text-bg-success' if r.payment_confirmed else 'text-bg-warning' }}">
+                {{ 'Pago' if r.payment_confirmed else 'Pendente' }} • R$ {{ '%.2f'|format(r.payment_value) }}
+              </span>
+            {% else %}
+              <span class="badge text-bg-light text-dark border">Gratuito</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if r.status == 'Confirmada' %}<span class="badge text-bg-success">Confirmada</span>
+            {% elif r.status == 'Pendente' %}<span class="badge text-bg-warning">Pendente</span>
+            {% else %}<span class="badge text-bg-secondary">Cancelada</span>{% endif %}
+          </td>
+          <td class="text-end">
+            <a href="{{ url_for('reserva_editar', reserva_id=r.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% if not reservas %}
+<p class="text-muted mt-3">Nenhuma reserva encontrada.</p>
+{% endif %}
+{% endblock %}

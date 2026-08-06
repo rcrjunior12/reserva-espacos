@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Reserva{% endblock %}
+{% block content %}
+{% set f = form or reserva %}
+<div class="card p-3 p-lg-4 mx-auto" style="max-width: 720px;">
+  <h5 class="fw-semibold mb-3">{{ 'Editar reserva' if reserva else 'Nova reserva' }}</h5>
+  <form method="post" enctype="multipart/form-data">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Espaço *</label>
+        <select name="space_id" id="space_id" class="form-select" required onchange="updateActivities()">
+          <option value="">Selecione...</option>
+          {% for s in spaces %}
+          <option value="{{ s.id }}"
+            data-activities="{{ s.activities_list()|join(',') }}"
+            {% if f and (f.space_id|string) == (s.id|string) %}selected{% endif %}>
+            {{ s.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Atividade</label>
+        <input list="activity-options" name="activity" id="activity" class="form-control"
+               value="{{ f.activity if f else '' }}" placeholder="Ex: Vôlei, Reunião...">
+        <datalist id="activity-options"></datalist>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">Data *</label>
+        <input type="date" name="date" class="form-control" required value="{{ f.date if f else '' }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Início *</label>
+        <input type="time" name="start_time" class="form-control" required value="{{ f.start_time if f else '' }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Término *</label>
+        <input type="time" name="end_time" class="form-control" required value="{{ f.end_time if f else '' }}">
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Nome do responsável *</label>
+        <input type="text" name="requester_name" class="form-control" required value="{{ f.requester_name if f else '' }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Contato (telefone/e-mail)</label>
+        <input type="text" name="requester_contact" class="form-control" value="{{ f.requester_contact if f else '' }}">
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Ministério</label>
+        <select name="ministry_id" class="form-select">
+          <option value="">— Nenhum / Particular —</option>
+          {% for m in ministries %}
+          <option value="{{ m.id }}" {% if f and (f.ministry_id|string) == (m.id|string) %}selected{% endif %}>{{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Status</label>
+        <select name="status" class="form-select">
+          {% for st in status_options %}
+          <option value="{{ st }}" {% if f and f.status == st %}selected{% elif not f and st == 'Confirmada' %}selected{% endif %}>{{ st }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-12">
+        <hr>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" role="switch" id="is_paid" name="is_paid"
+                 onchange="togglePayment()" {% if f and f.is_paid %}checked{% endif %}>
+          <label class="form-check-label fw-semibold" for="is_paid">Reserva paga</label>
+        </div>
+      </div>
+
+      <div id="payment-fields" class="col-12 row g-3" style="display:none;">
+        <div class="col-md-4">
+          <label class="form-label">Forma de pagamento</label>
+          <select name="payment_method" class="form-select">
+            <option value="">Selecione...</option>
+            {% for fm in formas %}
+            <option value="{{ fm }}" {% if f and f.payment_method == fm %}selected{% endif %}>{{ fm }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Valor (R$)</label>
+          <input type="number" step="0.01" min="0" name="payment_value" class="form-control" value="{{ f.payment_value if f and f.payment_value else '' }}">
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="payment_confirmed" name="payment_confirmed" {% if f and f.payment_confirmed %}checked{% endif %}>
+            <label class="form-check-label" for="payment_confirmed">Pagamento recebido</label>
+          </div>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Comprovante de pagamento</label>
+          <input type="file" name="payment_proof" class="form-control" accept="image/*,application/pdf">
+          {% if reserva and reserva.payment_proof_filename %}
+          <small class="text-muted">Já existe um comprovante anexado. Enviar um novo arquivo irá substituí-lo.</small>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="col-12">
+        <label class="form-label">Observações</label>
+        <textarea name="notes" class="form-control" rows="2">{{ f.notes if f else '' }}</textarea>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-4">
+      <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Salvar reserva</button>
+      <a href="{{ url_for('reservas_list') }}" class="btn btn-outline-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePayment() {
+  document.getElementById('payment-fields').style.display =
+    document.getElementById('is_paid').checked ? 'flex' : 'none';
+}
+function updateActivities() {
+  const select = document.getElementById('space_id');
+  const opt = select.options[select.selectedIndex];
+  const list = (opt && opt.dataset.activities) ? opt.dataset.activities.split(',') : [];
+  const datalist = document.getElementById('activity-options');
+  datalist.innerHTML = '';
+  list.forEach(a => {
+    if (!a) return;
+    const o = document.createElement('option');
+    o.value = a;
+    datalist.appendChild(o);
+  });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  togglePayment();
+  updateActivities();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Ministérios{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="fw-semibold mb-0"><i class="bi bi-people me-1"></i>Ministérios</h5>
+  <a href="{{ url_for('ministerio_novo') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Novo ministério</a>
+</div>
+
+<div class="card p-0">
+  <ul class="list-group list-group-flush">
+    {% for m in ministries %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <div>
+        {{ m.name }}
+        {% if not m.active %}<span class="badge text-bg-secondary ms-1">Inativo</span>{% endif %}
+      </div>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('ministerio_editar', ministry_id=m.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+        <form method="post" action="{{ url_for('ministerio_excluir', ministry_id=m.id) }}" onsubmit="return confirm('Excluir este ministério?');">
+          <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+        </form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% if not ministries %}
+<p class="text-muted mt-3">Nenhum ministério cadastrado ainda.</p>
+{% endif %}
+{% endblock %}

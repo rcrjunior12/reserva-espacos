@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Espaços{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="fw-semibold mb-0"><i class="bi bi-geo-alt me-1"></i>Espaços</h5>
+  <a href="{{ url_for('espaco_novo') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Novo espaço</a>
+</div>
+
+<div class="row g-3">
+  {% for s in spaces %}
+  <div class="col-md-6 col-lg-4">
+    <div class="card p-3 h-100">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <span class="badge-space" style="background:{{ s.color }}"></span>
+          <span class="fw-semibold">{{ s.name }}</span>
+          {% if not s.active %}<span class="badge text-bg-secondary ms-1">Inativo</span>{% endif %}
+        </div>
+        <a href="{{ url_for('espaco_editar', space_id=s.id) }}" class="text-muted"><i class="bi bi-pencil"></i></a>
+      </div>
+      <div class="small text-muted mt-1">Tipo: {{ s.space_type }}</div>
+      {% if s.activities %}<div class="small text-muted">Atividades: {{ s.activities }}</div>{% endif %}
+      {% if s.notes %}<div class="small text-muted mt-1">{{ s.notes }}</div>{% endif %}
+      <div class="mt-2 d-flex gap-2">
+        <a href="{{ url_for('reserva_nova', space_id=s.id) }}" class="btn btn-sm btn-outline-primary">Reservar</a>
+        <form method="post" action="{{ url_for('espaco_excluir', space_id=s.id) }}" onsubmit="return confirm('Excluir este espaço?');">
+          <button type="submit" class="btn btn-sm btn-outline-danger">Excluir</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% if not spaces %}
+<p class="text-muted">Nenhum espaço cadastrado ainda.</p>
+{% endif %}
+{% endblock %}

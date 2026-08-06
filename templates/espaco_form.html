@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Espaço{% endblock %}
+{% block content %}
+<div class="card p-3 p-lg-4 mx-auto" style="max-width: 560px;">
+  <h5 class="fw-semibold mb-3">{{ 'Editar espaço' if space else 'Novo espaço' }}</h5>
+  <form method="post">
+    <div class="mb-3">
+      <label class="form-label">Nome</label>
+      <input type="text" name="name" class="form-control" required value="{{ space.name if space else '' }}" placeholder="Ex: Sala 2, Quadra de Cimento...">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Tipo</label>
+      <select name="space_type" class="form-select">
+        {% for t in ["Quadra", "Sala", "Churrasco", "Outro"] %}
+        <option value="{{ t }}" {% if space and space.space_type == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Atividades permitidas <small class="text-muted">(separadas por vírgula)</small></label>
+      <input type="text" name="activities" class="form-control" value="{{ space.activities if space else '' }}" placeholder="Ex: Vôlei, Futebol, Basquete">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Cor (para o calendário)</label>
+      <input type="color" name="color" class="form-control form-control-color" value="{{ space.color if space else '#2563eb' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Observações</label>
+      <textarea name="notes" class="form-control" rows="2">{{ space.notes if space else '' }}</textarea>
+    </div>
+    {% if space %}
+    <div class="form-check mb-3">
+      <input type="checkbox" name="active" class="form-check-input" id="active" {% if space.active %}checked{% endif %}>
+      <label class="form-check-label" for="active">Espaço ativo (disponível para novas reservas)</label>
+    </div>
+    {% endif %}
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">Salvar</button>
+      <a href="{{ url_for('espacos_list') }}" class="btn btn-outline-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

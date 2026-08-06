@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Entrar{% endblock %}
+{% block content %}
+<div class="login-wrapper">
+  <div class="card login-card shadow-lg p-4">
+    <div class="text-center mb-4">
+      <img src="{{ url_for('static', filename='img/logo-patio.svg') }}" alt="Pátio Esportes" style="height: 46px; width: auto;" class="mb-3">
+      <h6 class="mb-0 text-uppercase" style="letter-spacing: 0.06em; color: var(--brand);">Reserva de Espaços</h6>
+      <small class="text-muted">Painel do gestor</small>
+    </div>
+    <form method="post">
+      <div class="mb-3">
+        <label class="form-label">E-mail</label>
+        <input type="email" name="email" class="form-control" required autofocus>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Senha</label>
+        <input type="password" name="password" class="form-control" required>
+      </div>
+      <button type="submit" class="btn btn-primary w-100">Entrar</button>
+    </form>
+    <p class="text-center text-muted mt-3 mb-0" style="font-size: 0.8rem;">
+      Acesso restrito ao gestor da ONG.
+    </p>
+  </div>
+</div>
+{% endblock %}

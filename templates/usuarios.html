@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Usuários{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="fw-semibold mb-0"><i class="bi bi-person-badge me-1"></i>Usuários do sistema</h5>
+  <a href="{{ url_for('usuario_novo') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Novo usuário</a>
+</div>
+
+<div class="card p-0">
+  <ul class="list-group list-group-flush">
+    {% for u in usuarios %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <div>
+        <span class="fw-semibold">{{ u.name }}</span>
+        {% if u.id == current_user.id %}<span class="badge text-bg-primary ms-1">Você</span>{% endif %}
+        <div class="small text-muted">{{ u.email }}</div>
+      </div>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('usuario_editar', user_id=u.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+        {% if u.id != current_user.id %}
+        <form method="post" action="{{ url_for('usuario_excluir', user_id=u.id) }}" onsubmit="return confirm('Excluir o usuário {{ u.name }}?');">
+          <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+        </form>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+<p class="text-muted small mt-2">Qualquer usuário cadastrado aqui tem acesso completo ao sistema (não existe perfil limitado por enquanto).</p>
+{% endblock %}
