@@ -10,10 +10,11 @@ from flask_login import (
     LoginManager, login_user, logout_user, login_required, current_user
 )
 from werkzeug.utils import secure_filename
+from sqlalchemy import inspect, text
 
 from models import (
-    db, User, Space, Ministry, Reservation, seed_data,
-    FORMAS_PAGAMENTO, STATUS_RESERVA
+    db, User, Space, Ministry, Reservation, RecurringBooking, MonthlyBill, seed_data,
+    FORMAS_PAGAMENTO, STATUS_RESERVA, BILLING_TYPES, STATUS_RECORRENTE, DIAS_SEMANA
 )
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -76,6 +77,8 @@ def logout():
 @app.route("/")
 @login_required
 def dashboard():
+    topup_recurring_bookings()
+
     today = date.today().isoformat()
     proximas = (
         Reservation.query.filter(Reservation.date >= today, Reservation.status != "Cancelada")
@@ -84,20 +87,34 @@ def dashboard():
         .all()
     )
     pendentes_pagamento = (
-        Reservation.query.filter_by(is_paid=True, payment_confirmed=False)
+        Reservation.query.filter_by(
+            is_paid=True, payment_confirmed=False, recurring_booking_id=None
+        )
         .order_by(Reservation.date.asc())
+        .all()
+    )
+    mes_atual = date.today().strftime("%Y-%m")
+    faturas_pendentes = (
+        MonthlyBill.query.filter(
+            MonthlyBill.payment_confirmed == False,  # noqa: E712
+            MonthlyBill.month <= mes_atual,
+        )
+        .order_by(MonthlyBill.month.asc())
         .all()
     )
     total_espacos = Space.query.filter_by(active=True).count()
     total_reservas_mes = Reservation.query.filter(
         Reservation.date >= date.today().replace(day=1).isoformat()
     ).count()
+    total_fixas_ativas = RecurringBooking.query.filter_by(status="Ativa").count()
     return render_template(
         "dashboard.html",
         proximas=proximas,
         pendentes_pagamento=pendentes_pagamento,
+        faturas_pendentes=faturas_pendentes,
         total_espacos=total_espacos,
         total_reservas_mes=total_reservas_mes,
+        total_fixas_ativas=total_fixas_ativas,
     )
 
 
@@ -147,6 +164,95 @@ def check_conflict(space_id, date_str, start_time, end_time, exclude_id=None):
         if start_time < r.end_time and end_time > r.start_time:
             return r
     return None
+
+
+# Quantos dias para frente a agenda de uma reserva fixa é gerada de cada vez.
+RECURRING_GENERATE_DAYS = 90
+# Quando faltar menos que isso de agenda gerada, estende automaticamente.
+RECURRING_TOPUP_THRESHOLD_DAYS = 30
+
+
+def generate_recurring_occurrences(recurring, months_ahead_days=RECURRING_GENERATE_DAYS):
+    """Cria as reservas (Reservation) individuais e as faturas mensais (MonthlyBill)
+    de uma reserva fixa, a partir da última ocorrência já gerada (ou start_date),
+    até `months_ahead_days` no futuro. Pula datas com conflito e avisa quais."""
+    if recurring.status != "Ativa":
+        return [], []
+
+    weekdays = set(recurring.weekdays_list())
+    horizon = date.today() + timedelta(days=months_ahead_days)
+
+    last = (
+        Reservation.query.filter_by(recurring_booking_id=recurring.id)
+        .order_by(Reservation.date.desc())
+        .first()
+    )
+    if last:
+        cursor = datetime.strptime(last.date, "%Y-%m-%d").date() + timedelta(days=1)
+    else:
+        cursor = datetime.strptime(recurring.start_date, "%Y-%m-%d").date()
+
+    created = []
+    conflicts = []
+    months_touched = set()
+
+    while cursor <= horizon:
+        if cursor.weekday() in weekdays:
+            date_str = cursor.isoformat()
+            conflict = check_conflict(recurring.space_id, date_str, recurring.start_time, recurring.end_time)
+            if conflict:
+                conflicts.append(date_str)
+            else:
+                r = Reservation(
+                    space_id=recurring.space_id,
+                    ministry_id=recurring.ministry_id,
+                    requester_name=recurring.requester_name,
+                    requester_contact=recurring.requester_contact,
+                    activity=recurring.activity,
+                    date=date_str,
+                    start_time=recurring.start_time,
+                    end_time=recurring.end_time,
+                    is_paid=False,
+                    status="Confirmada",
+                    notes="Gerada automaticamente por reserva fixa. O pagamento (se houver) é controlado pela cobrança mensal, não por esta ocorrência.",
+                    created_by=recurring.created_by,
+                    recurring_booking_id=recurring.id,
+                )
+                db.session.add(r)
+                created.append(date_str)
+                months_touched.add(cursor.strftime("%Y-%m"))
+        cursor += timedelta(days=1)
+
+    if recurring.billing_type == "Mensal":
+        for month in months_touched:
+            exists = MonthlyBill.query.filter_by(recurring_booking_id=recurring.id, month=month).first()
+            if not exists:
+                db.session.add(MonthlyBill(
+                    recurring_booking_id=recurring.id,
+                    month=month,
+                    value=recurring.monthly_value,
+                    payment_method=recurring.payment_method,
+                ))
+
+    db.session.commit()
+    return created, conflicts
+
+
+def topup_recurring_bookings():
+    """Verifica todas as reservas fixas ativas e estende a agenda gerada
+    quando estiver acabando. Seguro de chamar em toda visita ao painel."""
+    ativos = RecurringBooking.query.filter_by(status="Ativa").all()
+    for recurring in ativos:
+        last = (
+            Reservation.query.filter_by(recurring_booking_id=recurring.id)
+            .order_by(Reservation.date.desc())
+            .first()
+        )
+        dias_restantes = None
+        if last:
+            dias_restantes = (datetime.strptime(last.date, "%Y-%m-%d").date() - date.today()).days
+        if last is None or dias_restantes is not None and dias_restantes < RECURRING_TOPUP_THRESHOLD_DAYS:
+            generate_recurring_occurrences(recurring)
 
 
 @app.route("/reservas")
@@ -486,6 +592,153 @@ def ministerio_excluir(ministry_id):
     return redirect(url_for("ministerios_list"))
 
 
+# ---------- Reservas fixas / recorrentes ----------
+
+@app.route("/recorrentes")
+@login_required
+def recorrentes_list():
+    topup_recurring_bookings()
+    recorrentes = RecurringBooking.query.order_by(
+        RecurringBooking.status.asc(), RecurringBooking.requester_name.asc()
+    ).all()
+    return render_template("recorrentes_list.html", recorrentes=recorrentes)
+
+
+@app.route("/recorrentes/nova", methods=["GET", "POST"])
+@login_required
+def recorrente_nova():
+    spaces = Space.query.filter_by(active=True).order_by(Space.name).all()
+    ministries = Ministry.query.filter_by(active=True).order_by(Ministry.name).all()
+
+    if request.method == "POST":
+        form = request.form
+        space_id = form.get("space_id", type=int)
+        dias = form.getlist("weekdays")
+        start_time = form.get("start_time", "")
+        end_time = form.get("end_time", "")
+        start_date = form.get("start_date", "")
+        billing_type = form.get("billing_type", "Gratuita")
+        monthly_value = form.get("monthly_value", "")
+
+        errors = []
+        if not space_id:
+            errors.append("Selecione um espaço.")
+        if not dias:
+            errors.append("Selecione ao menos um dia da semana.")
+        if not start_time or not end_time or start_time >= end_time:
+            errors.append("Horário inválido.")
+        if not start_date:
+            errors.append("Informe a data de início.")
+        if not form.get("requester_name", "").strip():
+            errors.append("Informe o nome do responsável.")
+        if billing_type == "Mensal" and (not monthly_value or float(monthly_value or 0) <= 0):
+            errors.append("Informe o valor da mensalidade.")
+
+        if errors:
+            for e in errors:
+                flash(e, "danger")
+            return render_template(
+                "recorrente_form.html", spaces=spaces, ministries=ministries,
+                formas=FORMAS_PAGAMENTO, dias_semana=DIAS_SEMANA,
+                recorrente=None, form=form,
+            )
+
+        recurring = RecurringBooking(
+            space_id=space_id,
+            ministry_id=form.get("ministry_id", type=int) or None,
+            requester_name=form.get("requester_name", "").strip(),
+            requester_contact=form.get("requester_contact", "").strip(),
+            activity=form.get("activity", "").strip(),
+            weekdays=",".join(dias),
+            start_time=start_time,
+            end_time=end_time,
+            start_date=start_date,
+            billing_type=billing_type,
+            monthly_value=float(monthly_value) if billing_type == "Mensal" and monthly_value else 0.0,
+            payment_method=form.get("payment_method", "") if billing_type == "Mensal" else "",
+            notes=form.get("notes", "").strip(),
+            created_by=current_user.name,
+        )
+        db.session.add(recurring)
+        db.session.commit()
+
+        created, conflicts = generate_recurring_occurrences(recurring)
+        flash(f"Reserva fixa criada. {len(created)} ocorrência(s) geradas para os próximos meses.", "success")
+        if conflicts:
+            flash(
+                f"Atenção: {len(conflicts)} data(s) tiveram conflito com outra reserva e foram puladas: "
+                + ", ".join(conflicts[:10]) + ("..." if len(conflicts) > 10 else ""),
+                "danger",
+            )
+        return redirect(url_for("recorrente_detail", recorrente_id=recurring.id))
+
+    return render_template(
+        "recorrente_form.html", spaces=spaces, ministries=ministries,
+        formas=FORMAS_PAGAMENTO, dias_semana=DIAS_SEMANA,
+        recorrente=None, form=None,
+    )
+
+
+@app.route("/recorrentes/<int:recorrente_id>")
+@login_required
+def recorrente_detail(recorrente_id):
+    recurring = RecurringBooking.query.get_or_404(recorrente_id)
+    hoje = date.today().isoformat()
+    proximas = [r for r in recurring.reservations if r.date >= hoje and r.status != "Cancelada"]
+    passadas = [r for r in recurring.reservations if r.date < hoje]
+    bills = sorted(recurring.bills, key=lambda b: b.month, reverse=True)
+    return render_template(
+        "recorrente_detail.html", recurring=recurring,
+        proximas=proximas, passadas=passadas, bills=bills,
+    )
+
+
+@app.route("/recorrentes/<int:recorrente_id>/encerrar", methods=["POST"])
+@login_required
+def recorrente_encerrar(recorrente_id):
+    recurring = RecurringBooking.query.get_or_404(recorrente_id)
+    recurring.status = "Encerrada"
+    hoje = date.today().isoformat()
+    canceladas = 0
+    for r in recurring.reservations:
+        if r.date >= hoje and r.status != "Cancelada":
+            r.status = "Cancelada"
+            canceladas += 1
+    db.session.commit()
+    flash(f"Reserva fixa encerrada. {canceladas} ocorrência(s) futuras foram canceladas.", "info")
+    return redirect(url_for("recorrente_detail", recorrente_id=recurring.id))
+
+
+@app.route("/recorrentes/<int:recorrente_id>/faturas/<int:bill_id>/pagar", methods=["GET", "POST"])
+@login_required
+def fatura_pagar(recorrente_id, bill_id):
+    recurring = RecurringBooking.query.get_or_404(recorrente_id)
+    bill = MonthlyBill.query.get_or_404(bill_id)
+    if bill.recurring_booking_id != recurring.id:
+        abort(404)
+
+    if request.method == "POST":
+        bill.payment_method = request.form.get("payment_method", bill.payment_method)
+        bill.value = float(request.form.get("value") or bill.value)
+        bill.payment_confirmed = request.form.get("payment_confirmed") == "on"
+        bill.paid_at = date.today().isoformat() if bill.payment_confirmed else ""
+        bill.notes = request.form.get("notes", "").strip()
+
+        file = request.files.get("payment_proof")
+        if file and file.filename and allowed_file(file.filename):
+            filename = secure_filename(f"{datetime.utcnow().timestamp()}_{file.filename}")
+            file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+            bill.payment_proof_filename = filename
+
+        db.session.commit()
+        flash("Fatura atualizada.", "success")
+        return redirect(url_for("recorrente_detail", recorrente_id=recurring.id))
+
+    return render_template(
+        "fatura_form.html", recurring=recurring, bill=bill, formas=FORMAS_PAGAMENTO,
+    )
+
+
 # ---------- Conta ----------
 
 @app.route("/conta/senha", methods=["GET", "POST"])
@@ -611,9 +864,22 @@ def usuario_excluir(user_id):
     return redirect(url_for("usuarios_list"))
 
 
+def run_light_migrations():
+    """Adiciona colunas/tabelas novas em bancos já existentes, sem apagar dados.
+    (Alternativa simples a uma ferramenta de migração completa.)"""
+    inspector = inspect(db.engine)
+    if inspector.has_table("reservation"):
+        cols = {c["name"] for c in inspector.get_columns("reservation")}
+        if "recurring_booking_id" not in cols:
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE reservation ADD COLUMN recurring_booking_id INTEGER"))
+                conn.commit()
+
+
 with app.app_context():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     db.create_all()
+    run_light_migrations()
     seed_data()
 
 

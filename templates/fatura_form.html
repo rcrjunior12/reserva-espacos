@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Fatura {{ bill.month }}{% endblock %}
+{% block content %}
+<div class="card p-3 p-lg-4 mx-auto" style="max-width: 520px;">
+  <h5 class="fw-semibold mb-1">Fatura de {{ bill.month }}</h5>
+  <p class="text-muted small mb-3">{{ recurring.requester_name }} • {{ recurring.space.name }}</p>
+  <form method="post" enctype="multipart/form-data">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Valor (R$)</label>
+        <input type="number" step="0.01" min="0" name="value" class="form-control" value="{{ bill.value }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Forma de pagamento</label>
+        <select name="payment_method" class="form-select">
+          <option value="">Selecione...</option>
+          {% for fm in formas %}
+          <option value="{{ fm }}" {% if bill.payment_method == fm %}selected{% endif %}>{{ fm }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12">
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" role="switch" id="payment_confirmed" name="payment_confirmed" {% if bill.payment_confirmed %}checked{% endif %}>
+          <label class="form-check-label" for="payment_confirmed">Pagamento recebido</label>
+        </div>
+      </div>
+      <div class="col-12">
+        <label class="form-label">Comprovante</label>
+        <input type="file" name="payment_proof" class="form-control" accept="image/*,application/pdf">
+        {% if bill.payment_proof_filename %}
+        <small class="text-muted">Já existe um comprovante anexado. Enviar um novo substitui.</small>
+        {% endif %}
+      </div>
+      <div class="col-12">
+        <label class="form-label">Observações</label>
+        <textarea name="notes" class="form-control" rows="2">{{ bill.notes or '' }}</textarea>
+      </div>
+    </div>
+    <div class="d-flex gap-2 mt-4">
+      <button type="submit" class="btn btn-primary">Salvar</button>
+      <a href="{{ url_for('recorrente_detail', recorrente_id=recurring.id) }}" class="btn btn-outline-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

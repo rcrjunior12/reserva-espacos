@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Nova reserva fixa{% endblock %}
+{% block content %}
+{% set f = form %}
+<div class="card p-3 p-lg-4 mx-auto" style="max-width: 720px;">
+  <h5 class="fw-semibold mb-1">Nova reserva fixa</h5>
+  <p class="text-muted small mb-3">Cria uma reserva que se repete toda semana, sem data para acabar (até ser encerrada manualmente).</p>
+  <form method="post">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Espaço *</label>
+        <select name="space_id" class="form-select" required>
+          <option value="">Selecione...</option>
+          {% for s in spaces %}
+          <option value="{{ s.id }}" {% if f and (f.space_id|string) == (s.id|string) %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Atividade</label>
+        <input type="text" name="activity" class="form-control" value="{{ f.activity if f else '' }}" placeholder="Ex: Treino de vôlei">
+      </div>
+
+      <div class="col-12">
+        <label class="form-label">Dias da semana *</label>
+        <div class="d-flex flex-wrap gap-3">
+          {% for value, label in dias_semana %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="weekdays" value="{{ value }}" id="dia{{ value }}"
+              {% if f and value in f.getlist('weekdays') %}checked{% endif %}>
+            <label class="form-check-label" for="dia{{ value }}">{{ label }}</label>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">Início *</label>
+        <input type="time" name="start_time" class="form-control" required value="{{ f.start_time if f else '' }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Término *</label>
+        <input type="time" name="end_time" class="form-control" required value="{{ f.end_time if f else '' }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Data de início *</label>
+        <input type="date" name="start_date" class="form-control" required value="{{ f.start_date if f else '' }}">
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Nome do responsável *</label>
+        <input type="text" name="requester_name" class="form-control" required value="{{ f.requester_name if f else '' }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Contato</label>
+        <input type="text" name="requester_contact" class="form-control" value="{{ f.requester_contact if f else '' }}">
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Ministério</label>
+        <select name="ministry_id" class="form-select">
+          <option value="">— Nenhum / Particular —</option>
+          {% for m in ministries %}
+          <option value="{{ m.id }}" {% if f and (f.ministry_id|string) == (m.id|string) %}selected{% endif %}>{{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-12">
+        <hr>
+        <label class="form-label d-block">Tipo de cobrança *</label>
+        <div class="btn-group" role="group">
+          <input type="radio" class="btn-check" name="billing_type" id="btGratuita" value="Gratuita" onchange="toggleMensal()"
+            {% if not f or f.billing_type != 'Mensal' %}checked{% endif %}>
+          <label class="btn btn-outline-secondary" for="btGratuita">Gratuita</label>
+
+          <input type="radio" class="btn-check" name="billing_type" id="btMensal" value="Mensal" onchange="toggleMensal()"
+            {% if f and f.billing_type == 'Mensal' %}checked{% endif %}>
+          <label class="btn btn-outline-secondary" for="btMensal">Mensal (paga)</label>
+        </div>
+      </div>
+
+      <div id="mensal-fields" class="col-12 row g-3" style="display:none;">
+        <div class="col-md-6">
+          <label class="form-label">Valor da mensalidade (R$)</label>
+          <input type="number" step="0.01" min="0" name="monthly_value" class="form-control" value="{{ f.monthly_value if f and f.monthly_value else '' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Forma de pagamento</label>
+          <select name="payment_method" class="form-select">
+            <option value="">Selecione...</option>
+            {% for fm in formas %}
+            <option value="{{ fm }}" {% if f and f.payment_method == fm %}selected{% endif %}>{{ fm }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12">
+          <small class="text-muted">Uma fatura é gerada automaticamente pra cada mês. Você marca cada uma como paga (com comprovante) na tela da reserva fixa.</small>
+        </div>
+      </div>
+
+      <div class="col-12">
+        <label class="form-label">Observações</label>
+        <textarea name="notes" class="form-control" rows="2">{{ f.notes if f else '' }}</textarea>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-4">
+      <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Criar reserva fixa</button>
+      <a href="{{ url_for('recorrentes_list') }}" class="btn btn-outline-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleMensal() {
+  const isMensal = document.getElementById('btMensal').checked;
+  document.getElementById('mensal-fields').style.display = isMensal ? 'flex' : 'none';
+}
+document.addEventListener('DOMContentLoaded', toggleMensal);
+</script>
+{% endblock %}

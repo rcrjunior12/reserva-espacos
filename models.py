@@ -7,6 +7,12 @@ db = SQLAlchemy()
 
 FORMAS_PAGAMENTO = ["Dinheiro", "PIX", "Cartão de crédito", "Cartão de débito", "Transferência bancária", "Outro"]
 STATUS_RESERVA = ["Confirmada", "Pendente", "Cancelada"]
+BILLING_TYPES = ["Gratuita", "Mensal"]
+STATUS_RECORRENTE = ["Ativa", "Encerrada"]
+DIAS_SEMANA = [
+    ("0", "Segunda"), ("1", "Terça"), ("2", "Quarta"), ("3", "Quinta"),
+    ("4", "Sexta"), ("5", "Sábado"), ("6", "Domingo"),
+]
 
 
 class User(UserMixin, db.Model):
@@ -70,8 +76,72 @@ class Reservation(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_by = db.Column(db.String(120), default="")
 
+    recurring_booking_id = db.Column(db.Integer, db.ForeignKey("recurring_booking.id"), nullable=True)
+
     def datetime_range_str(self):
         return f"{self.date} {self.start_time} - {self.end_time}"
+
+
+class RecurringBooking(db.Model):
+    __tablename__ = "recurring_booking"
+
+    id = db.Column(db.Integer, primary_key=True)
+    space_id = db.Column(db.Integer, db.ForeignKey("space.id"), nullable=False)
+    ministry_id = db.Column(db.Integer, db.ForeignKey("ministry.id"), nullable=True)
+
+    requester_name = db.Column(db.String(120), nullable=False)
+    requester_contact = db.Column(db.String(120), default="")
+    activity = db.Column(db.String(120), default="")
+
+    weekdays = db.Column(db.String(20), nullable=False)  # ex: "0,2,4" (Segunda=0 ... Domingo=6)
+    start_time = db.Column(db.String(5), nullable=False)
+    end_time = db.Column(db.String(5), nullable=False)
+    start_date = db.Column(db.String(10), nullable=False)  # primeira data considerada
+
+    billing_type = db.Column(db.String(20), default="Gratuita")  # Gratuita | Mensal
+    monthly_value = db.Column(db.Float, default=0.0)
+    payment_method = db.Column(db.String(50), default="")
+
+    status = db.Column(db.String(20), default="Ativa")  # Ativa | Encerrada
+    notes = db.Column(db.Text, default="")
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.Column(db.String(120), default="")
+
+    space = db.relationship("Space", backref="recurring_bookings")
+    ministry = db.relationship("Ministry", backref="recurring_bookings")
+    reservations = db.relationship(
+        "Reservation", backref="recurring_booking", lazy=True,
+        order_by="Reservation.date"
+    )
+    bills = db.relationship(
+        "MonthlyBill", backref="recurring_booking", lazy=True,
+        order_by="MonthlyBill.month", cascade="all, delete-orphan"
+    )
+
+    def weekdays_list(self):
+        return [int(x) for x in self.weekdays.split(",") if x != ""]
+
+    def weekdays_labels(self):
+        labels = dict(DIAS_SEMANA)
+        return [labels[str(d)] for d in self.weekdays_list()]
+
+
+class MonthlyBill(db.Model):
+    __tablename__ = "monthly_bill"
+
+    id = db.Column(db.Integer, primary_key=True)
+    recurring_booking_id = db.Column(db.Integer, db.ForeignKey("recurring_booking.id"), nullable=False)
+
+    month = db.Column(db.String(7), nullable=False)  # "YYYY-MM"
+    value = db.Column(db.Float, default=0.0)
+    payment_method = db.Column(db.String(50), default="")
+    payment_confirmed = db.Column(db.Boolean, default=False)
+    payment_proof_filename = db.Column(db.String(255), default="")
+    paid_at = db.Column(db.String(10), default="")
+    notes = db.Column(db.Text, default="")
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 def seed_data():

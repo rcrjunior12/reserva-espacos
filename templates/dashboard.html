@@ -21,13 +21,15 @@
     </div>
   </div>
   <div class="col-6 col-lg-3">
-    <div class="stat-card-neutral">
-      <div class="stat-icon" style="background: #f5efe3; color: var(--brand-gold);"><i class="bi bi-cash-coin"></i></div>
-      <div>
-        <div class="small text-muted">Pagamentos pendentes</div>
-        <div class="fs-3 fw-bold">{{ pendentes_pagamento|length }}</div>
+    <a href="{{ url_for('recorrentes_list') }}" class="text-decoration-none">
+      <div class="stat-card-neutral">
+        <div class="stat-icon" style="background: #f5efe3; color: var(--brand-gold);"><i class="bi bi-arrow-repeat"></i></div>
+        <div>
+          <div class="small text-muted">Reservas fixas ativas</div>
+          <div class="fs-3 fw-bold text-dark">{{ total_fixas_ativas }}</div>
+        </div>
       </div>
-    </div>
+    </a>
   </div>
   <div class="col-6 col-lg-3">
     <a href="{{ url_for('reserva_nova') }}" class="text-decoration-none">
@@ -78,7 +80,7 @@
   <div class="col-lg-5">
     <div class="card p-3">
       <h6 class="fw-semibold mb-3"><i class="bi bi-cash-coin me-1"></i>Pagamentos pendentes</h6>
-      {% if pendentes_pagamento %}
+      {% if pendentes_pagamento or faturas_pendentes %}
         <ul class="list-group list-group-flush">
           {% for r in pendentes_pagamento %}
           <li class="list-group-item d-flex justify-content-between align-items-center px-0">
@@ -87,6 +89,15 @@
               <div class="small text-muted">{{ r.space.name }} • {{ r.date }}</div>
             </div>
             <span class="badge text-bg-warning">R$ {{ '%.2f'|format(r.payment_value) }}</span>
+          </li>
+          {% endfor %}
+          {% for b in faturas_pendentes %}
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+            <div>
+              <a href="{{ url_for('fatura_pagar', recorrente_id=b.recurring_booking_id, bill_id=b.id) }}" class="text-decoration-none">{{ b.recurring_booking.requester_name }}</a>
+              <div class="small text-muted">Mensalidade • {{ b.month }}</div>
+            </div>
+            <span class="badge text-bg-warning">R$ {{ '%.2f'|format(b.value) }}</span>
           </li>
           {% endfor %}
         </ul>

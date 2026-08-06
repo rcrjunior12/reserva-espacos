@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Reserva fixa{% endblock %}
+{% block content %}
+<div class="card p-3 p-lg-4 mb-3">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <span class="badge-space" style="background:{{ recurring.space.color }}"></span>
+      <span class="fs-5 fw-semibold">{{ recurring.requester_name }}</span>
+      {% if recurring.status == 'Ativa' %}<span class="badge text-bg-success ms-2">Ativa</span>
+      {% else %}<span class="badge text-bg-secondary ms-2">Encerrada</span>{% endif %}
+    </div>
+    {% if recurring.status == 'Ativa' %}
+    <form method="post" action="{{ url_for('recorrente_encerrar', recorrente_id=recurring.id) }}"
+          onsubmit="return confirm('Encerrar esta reserva fixa? As ocorrências futuras ainda não realizadas serão canceladas.');">
+      <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-x-circle me-1"></i>Encerrar</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <dl class="row mb-0 mt-3">
+    <dt class="col-5 col-md-3 text-muted fw-normal">Espaço</dt>
+    <dd class="col-7 col-md-9">{{ recurring.space.name }}</dd>
+
+    <dt class="col-5 col-md-3 text-muted fw-normal">Dias / Horário</dt>
+    <dd class="col-7 col-md-9">{{ recurring.weekdays_labels()|join(', ') }} • {{ recurring.start_time }} às {{ recurring.end_time }}</dd>
+
+    <dt class="col-5 col-md-3 text-muted fw-normal">Atividade</dt>
+    <dd class="col-7 col-md-9">{{ recurring.activity or '—' }}</dd>
+
+    <dt class="col-5 col-md-3 text-muted fw-normal">Contato</dt>
+    <dd class="col-7 col-md-9">{{ recurring.requester_contact or '—' }}</dd>
+
+    <dt class="col-5 col-md-3 text-muted fw-normal">Ministério</dt>
+    <dd class="col-7 col-md-9">{{ recurring.ministry.name if recurring.ministry else '—' }}</dd>
+
+    <dt class="col-5 col-md-3 text-muted fw-normal">Cobrança</dt>
+    <dd class="col-7 col-md-9">
+      {% if recurring.billing_type == 'Mensal' %}
+        Mensal • R$ {{ '%.2f'|format(recurring.monthly_value) }} • {{ recurring.payment_method or 'forma não informada' }}
+      {% else %}
+        Gratuita
+      {% endif %}
+    </dd>
+
+    <dt class="col-5 col-md-3 text-muted fw-normal">Válida desde</dt>
+    <dd class="col-7 col-md-9">{{ recurring.start_date }}</dd>
+
+    <dt class="col-5 col-md-3 text-muted fw-normal">Observações</dt>
+    <dd class="col-7 col-md-9">{{ recurring.notes or '—' }}</dd>
+  </dl>
+</div>
+
+{% if recurring.billing_type == 'Mensal' %}
+<div class="card p-3 p-lg-4 mb-3">
+  <h6 class="fw-semibold mb-3"><i class="bi bi-receipt me-1"></i>Faturas mensais</h6>
+  {% if bills %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="text-muted small"><tr><th>Mês</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for b in bills %}
+        <tr>
+          <td>{{ b.month }}</td>
+          <td>R$ {{ '%.2f'|format(b.value) }}</td>
+          <td>
+            {% if b.payment_confirmed %}<span class="badge text-bg-success">Paga em {{ b.paid_at }}</span>
+            {% else %}<span class="badge text-bg-warning">Pendente</span>{% endif %}
+            {% if b.payment_proof_filename %}
+            <a href="{{ url_for('uploaded_file', filename=b.payment_proof_filename) }}" target="_blank" class="ms-1"><i class="bi bi-paperclip"></i></a>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <a href="{{ url_for('fatura_pagar', recorrente_id=recurring.id, bill_id=b.id) }}" class="btn btn-sm btn-outline-primary">
+              {{ 'Editar' if b.payment_confirmed else 'Marcar como paga' }}
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted mb-0">Nenhuma fatura gerada ainda.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-calendar-event me-1"></i>Próximas ocorrências</h6>
+      {% if proximas %}
+      <ul class="list-group list-group-flush">
+        {% for r in proximas[:15] %}
+        <li class="list-group-item px-0 d-flex justify-content-between">
+          <a href="{{ url_for('reserva_detail', reserva_id=r.id) }}" class="text-decoration-none">{{ r.date }}</a>
+          <span class="text-muted small">{{ r.start_time }}-{{ r.end_time }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted mb-0">Nenhuma ocorrência futura gerada.</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-clock-history me-1"></i>Ocorrências passadas</h6>
+      {% if passadas %}
+      <ul class="list-group list-group-flush">
+        {% for r in passadas[-15:]|reverse %}
+        <li class="list-group-item px-0 d-flex justify-content-between">
+          <a href="{{ url_for('reserva_detail', reserva_id=r.id) }}" class="text-decoration-none">{{ r.date }}</a>
+          <span class="text-muted small">{{ r.status }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted mb-0">Nenhuma ocorrência passada ainda.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<a href="{{ url_for('recorrentes_list') }}" class="btn btn-outline-secondary mt-3">Voltar</a>
+{% endblock %}
