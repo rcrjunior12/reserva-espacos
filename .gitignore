@@ -1,7 +1,7 @@
+venv/
 __pycache__/
 *.pyc
-reservas.db
+*.db
+*.db-journal
 uploads/*
 !uploads/.gitkeep
-.env
-venv/

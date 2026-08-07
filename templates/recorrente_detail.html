@@ -11,7 +11,7 @@
     </div>
     {% if recurring.status == 'Ativa' %}
     <form method="post" action="{{ url_for('recorrente_encerrar', recorrente_id=recurring.id) }}"
-          onsubmit="return confirm('Encerrar esta reserva fixa? As ocorrências futuras ainda não realizadas serão canceladas.');">
+          onsubmit="return confirm('Encerrar esta reserva fixa? As ocorrências futuras ainda não realizadas serão canceladas e as cobranças pendentes de meses futuros serão removidas.');">
       <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-x-circle me-1"></i>Encerrar</button>
     </form>
     {% endif %}

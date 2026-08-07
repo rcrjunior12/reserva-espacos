@@ -80,8 +80,13 @@ def dashboard():
     topup_recurring_bookings()
 
     today = date.today().isoformat()
+    limite_30_dias = (date.today() + timedelta(days=30)).isoformat()
     proximas = (
-        Reservation.query.filter(Reservation.date >= today, Reservation.status != "Cancelada")
+        Reservation.query.filter(
+            Reservation.date >= today,
+            Reservation.date <= limite_30_dias,
+            Reservation.status != "Cancelada",
+        )
         .order_by(Reservation.date.asc(), Reservation.start_time.asc())
         .limit(8)
         .all()
@@ -104,9 +109,7 @@ def dashboard():
     )
     total_espacos = Space.query.filter_by(active=True).count()
 
-    inicio_mes = date.today().replace(day=1)
-    prox_mes = (inicio_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
-    fim_mes = prox_mes - timedelta(days=1)
+    inicio_mes, fim_mes = limites_mes()
     total_reservas_mes = Reservation.query.filter(
         Reservation.date >= inicio_mes.isoformat(),
         Reservation.date <= fim_mes.isoformat(),
@@ -183,6 +186,15 @@ def check_conflict(space_id, date_str, start_time, end_time, exclude_id=None):
             if afetados & space_occupied_ids(r.space):
                 return r
     return None
+
+
+def limites_mes(ref=None):
+    """Retorna (primeiro_dia, ultimo_dia) do mês de referência (hoje, se não informado)."""
+    ref = ref or date.today()
+    inicio = ref.replace(day=1)
+    prox = (inicio.replace(day=28) + timedelta(days=4)).replace(day=1)
+    fim = prox - timedelta(days=1)
+    return inicio, fim
 
 
 # Quantos dias para frente a agenda de uma reserva fixa é gerada de cada vez.
@@ -299,16 +311,15 @@ def reservas_list():
 
     hoje = date.today()
     if periodo == "mes_atual":
-        inicio_mes = hoje.replace(day=1)
-        prox_mes = (inicio_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+        inicio_mes, fim_mes = limites_mes()
         date_from = inicio_mes.isoformat()
-        date_to = (prox_mes - timedelta(days=1)).isoformat()
+        date_to = fim_mes.isoformat()
     elif periodo == "proximo_mes":
-        inicio_mes = hoje.replace(day=1)
-        prox_mes = (inicio_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
-        depois = (prox_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+        _, fim_mes_atual = limites_mes()
+        prox_mes = fim_mes_atual + timedelta(days=1)
+        _, fim_prox_mes = limites_mes(prox_mes)
         date_from = prox_mes.isoformat()
-        date_to = (depois - timedelta(days=1)).isoformat()
+        date_to = fim_prox_mes.isoformat()
 
     if date_from:
         query = query.filter(Reservation.date >= date_from)
@@ -785,13 +796,27 @@ def recorrente_encerrar(recorrente_id):
     recurring = RecurringBooking.query.get_or_404(recorrente_id)
     recurring.status = "Encerrada"
     hoje = date.today().isoformat()
+    mes_atual = date.today().strftime("%Y-%m")
+
     canceladas = 0
     for r in recurring.reservations:
         if r.date >= hoje and r.status != "Cancelada":
             r.status = "Cancelada"
             canceladas += 1
+
+    # Cobranças de meses que não vão mais acontecer não devem continuar pendentes.
+    # Preserva o mês atual (pode ter ocorrências já realizadas a cobrar) e qualquer fatura já paga.
+    faturas_removidas = 0
+    for bill in list(recurring.bills):
+        if bill.month > mes_atual and not bill.payment_confirmed:
+            db.session.delete(bill)
+            faturas_removidas += 1
+
     db.session.commit()
-    flash(f"Reserva fixa encerrada. {canceladas} ocorrência(s) futuras foram canceladas.", "info")
+    msg = f"Reserva fixa encerrada. {canceladas} ocorrência(s) futuras foram canceladas."
+    if faturas_removidas:
+        msg += f" {faturas_removidas} cobrança(s) futura(s) pendente(s) foram removidas."
+    flash(msg, "info")
     return redirect(url_for("recorrente_detail", recorrente_id=recurring.id))
 
 
@@ -802,15 +827,22 @@ def cobrancas_list():
     view = request.args.get("view", "pendentes")
     pagas = (view == "historico")
 
+    mes_atual = date.today().strftime("%Y-%m")
+    _, fim_mes_atual = limites_mes()
+
     itens = []
 
-    bills = (MonthlyBill.query.join(RecurringBooking)
-             .filter(MonthlyBill.payment_confirmed == pagas)  # noqa: E712
-             .all())
+    bills_q = MonthlyBill.query.join(RecurringBooking).filter(MonthlyBill.payment_confirmed == pagas)  # noqa: E712
+    if not pagas:
+        # Cobranças pendentes: só mostra o mês atual e meses anteriores (o que já venceu ou está vencendo).
+        # Faturas de meses futuros (geradas com antecedência) ainda não devem aparecer como pendência.
+        bills_q = bills_q.filter(MonthlyBill.month <= mes_atual)
+    bills = bills_q.all()
     for b in bills:
         itens.append({
             "tipo": "mensal",
             "tipo_label": "Fixa · Mensal",
+            "item_key": f"mensal:{b.id}",
             "responsavel": b.recurring_booking.requester_name,
             "space": b.recurring_booking.space,
             "referencia": b.month,
@@ -819,20 +851,21 @@ def cobrancas_list():
             "pago": b.payment_confirmed,
             "pago_em": b.paid_at,
             "comprovante": b.payment_proof_filename,
-            "link_dar_baixa": url_for("fatura_pagar", recorrente_id=b.recurring_booking_id, bill_id=b.id),
+            "link_dar_baixa": url_for("fatura_dar_baixa", bill_id=b.id),
             "link_editar": url_for("fatura_pagar", recorrente_id=b.recurring_booking_id, bill_id=b.id),
             "link_ver": url_for("recorrente_detail", recorrente_id=b.recurring_booking_id),
-            "acao_rapida": False,
             "ordenacao": b.month,
         })
 
-    avulsas = (Reservation.query
-               .filter_by(is_paid=True, recurring_booking_id=None, payment_confirmed=pagas)
-               .all())
+    avulsas_q = Reservation.query.filter_by(is_paid=True, recurring_booking_id=None, payment_confirmed=pagas)
+    if not pagas:
+        avulsas_q = avulsas_q.filter(Reservation.date <= fim_mes_atual.isoformat())
+    avulsas = avulsas_q.all()
     for r in avulsas:
         itens.append({
             "tipo": "avulsa",
             "tipo_label": "Avulsa",
+            "item_key": f"avulsa:{r.id}",
             "responsavel": r.requester_name,
             "space": r.space,
             "referencia": r.date,
@@ -844,7 +877,6 @@ def cobrancas_list():
             "link_dar_baixa": url_for("reserva_dar_baixa", reserva_id=r.id),
             "link_editar": url_for("reserva_editar", reserva_id=r.id),
             "link_ver": url_for("reserva_detail", reserva_id=r.id),
-            "acao_rapida": True,
             "ordenacao": r.date,
         })
 
@@ -868,6 +900,53 @@ def reserva_dar_baixa(reserva_id):
         db.session.commit()
         flash("Pagamento dado como recebido.", "success")
     return redirect(request.referrer or url_for("cobrancas_list"))
+
+
+@app.route("/faturas/<int:bill_id>/dar-baixa", methods=["POST"])
+@login_required
+def fatura_dar_baixa(bill_id):
+    bill = MonthlyBill.query.get_or_404(bill_id)
+    if bill.payment_confirmed:
+        flash("Esta fatura já estava paga.", "info")
+    else:
+        bill.payment_confirmed = True
+        bill.paid_at = date.today().isoformat()
+        db.session.commit()
+        flash("Fatura marcada como paga.", "success")
+    return redirect(request.referrer or url_for("cobrancas_list"))
+
+
+@app.route("/cobrancas/dar-baixa-em-lote", methods=["POST"])
+@login_required
+def cobrancas_dar_baixa_lote():
+    selecionados = request.form.getlist("itens")
+    hoje = date.today().isoformat()
+    count = 0
+    for item in selecionados:
+        if ":" not in item:
+            continue
+        tipo, _, id_str = item.partition(":")
+        if not id_str.isdigit():
+            continue
+        item_id = int(id_str)
+        if tipo == "mensal":
+            bill = MonthlyBill.query.get(item_id)
+            if bill and not bill.payment_confirmed:
+                bill.payment_confirmed = True
+                bill.paid_at = hoje
+                count += 1
+        elif tipo == "avulsa":
+            reserva = Reservation.query.get(item_id)
+            if reserva and reserva.is_paid and not reserva.payment_confirmed:
+                reserva.payment_confirmed = True
+                reserva.payment_paid_at = hoje
+                count += 1
+    if count:
+        db.session.commit()
+        flash(f"{count} pagamento(s) dado(s) como recebido(s).", "success")
+    else:
+        flash("Nenhum item selecionado (ou já estava pago).", "warning")
+    return redirect(url_for("cobrancas_list", view=request.form.get("view", "pendentes")))
 
 
 @app.route("/recorrentes/<int:recorrente_id>/faturas/<int:bill_id>/pagar", methods=["GET", "POST"])
@@ -1047,6 +1126,22 @@ def run_light_migrations():
             conn.commit()
 
 
+def cleanup_faturas_de_recorrentes_encerradas():
+    """Limpeza única e idempotente: remove cobranças pendentes de meses futuros
+    de reservas fixas que já foram encerradas (podem ter ficado para trás de
+    antes desta lógica existir no encerramento)."""
+    mes_atual = date.today().strftime("%Y-%m")
+    encerradas = RecurringBooking.query.filter_by(status="Encerrada").all()
+    removidas = 0
+    for recurring in encerradas:
+        for bill in list(recurring.bills):
+            if bill.month > mes_atual and not bill.payment_confirmed:
+                db.session.delete(bill)
+                removidas += 1
+    if removidas:
+        db.session.commit()
+
+
 def ensure_composite_space():
     """Garante a existência do espaço 'Pátio Completo': ao ser reservado, ocupa
     Quadra de Cimento, Quadra de Areia e Churrasqueira ao mesmo tempo."""
@@ -1079,6 +1174,7 @@ with app.app_context():
     run_light_migrations()
     seed_data()
     ensure_composite_space()
+    cleanup_faturas_de_recorrentes_encerradas()
 
 
 if __name__ == "__main__":
