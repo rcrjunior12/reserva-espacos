@@ -103,9 +103,16 @@ def dashboard():
         .all()
     )
     total_espacos = Space.query.filter_by(active=True).count()
+
+    inicio_mes = date.today().replace(day=1)
+    prox_mes = (inicio_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+    fim_mes = prox_mes - timedelta(days=1)
     total_reservas_mes = Reservation.query.filter(
-        Reservation.date >= date.today().replace(day=1).isoformat()
+        Reservation.date >= inicio_mes.isoformat(),
+        Reservation.date <= fim_mes.isoformat(),
+        Reservation.status != "Cancelada",
     ).count()
+
     total_fixas_ativas = RecurringBooking.query.filter_by(status="Ativa").count()
     return render_template(
         "dashboard.html",
@@ -152,9 +159,20 @@ def api_reservas():
 
 # ---------- Reservas ----------
 
+def space_occupied_ids(space):
+    """IDs de todos os espaços fisicamente ocupados quando `space` é reservado.
+    Espaços "pacote" (ex.: Pátio Completo) ocupam os espaços que os compõem."""
+    if space and space.is_composite:
+        ids = space.composite_ids_list()
+        return set(ids) if ids else {space.id}
+    return {space.id} if space else set()
+
+
 def check_conflict(space_id, date_str, start_time, end_time, exclude_id=None):
+    space = Space.query.get(space_id)
+    afetados = space_occupied_ids(space)
+
     query = Reservation.query.filter(
-        Reservation.space_id == space_id,
         Reservation.date == date_str,
         Reservation.status != "Cancelada",
     )
@@ -162,7 +180,8 @@ def check_conflict(space_id, date_str, start_time, end_time, exclude_id=None):
         query = query.filter(Reservation.id != exclude_id)
     for r in query.all():
         if start_time < r.end_time and end_time > r.start_time:
-            return r
+            if afetados & space_occupied_ids(r.space):
+                return r
     return None
 
 
@@ -264,6 +283,8 @@ def reservas_list():
     status = request.args.get("status", "")
     date_from = request.args.get("date_from", "")
     date_to = request.args.get("date_to", "")
+    periodo = request.args.get("periodo", "")
+    historico = request.args.get("historico", "")
 
     if space_id:
         query = query.filter_by(space_id=space_id)
@@ -271,19 +292,62 @@ def reservas_list():
         query = query.filter_by(ministry_id=ministry_id)
     if status:
         query = query.filter_by(status=status)
+    else:
+        # Por padrão, reservas canceladas não poluem a tela de reservas.
+        # Se o gestor quiser vê-las, pode selecionar "Cancelada" no filtro de status.
+        query = query.filter(Reservation.status != "Cancelada")
+
+    hoje = date.today()
+    if periodo == "mes_atual":
+        inicio_mes = hoje.replace(day=1)
+        prox_mes = (inicio_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+        date_from = inicio_mes.isoformat()
+        date_to = (prox_mes - timedelta(days=1)).isoformat()
+    elif periodo == "proximo_mes":
+        inicio_mes = hoje.replace(day=1)
+        prox_mes = (inicio_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+        depois = (prox_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+        date_from = prox_mes.isoformat()
+        date_to = (depois - timedelta(days=1)).isoformat()
+
     if date_from:
         query = query.filter(Reservation.date >= date_from)
     if date_to:
         query = query.filter(Reservation.date <= date_to)
 
-    reservas = query.order_by(Reservation.date.desc(), Reservation.start_time.asc()).all()
+    reservas_raw = query.order_by(Reservation.date.desc(), Reservation.start_time.asc()).all()
+
+    if historico:
+        # No histórico mostramos cada ocorrência normalmente (registro do que aconteceu).
+        reservas = reservas_raw
+    else:
+        # Na tela de Reservas, agrupamos as ocorrências de uma mesma reserva fixa
+        # em um único item (a próxima data), para não poluir a tela.
+        hoje_str = hoje.isoformat()
+        avulsas = [r for r in reservas_raw if not r.recurring_booking_id]
+        por_recorrente = {}
+        for r in reservas_raw:
+            if r.recurring_booking_id:
+                por_recorrente.setdefault(r.recurring_booking_id, []).append(r)
+        representantes = []
+        for ocorrencias in por_recorrente.values():
+            futuras = [o for o in ocorrencias if o.date >= hoje_str]
+            escolhida = min(futuras, key=lambda o: o.date) if futuras else max(ocorrencias, key=lambda o: o.date)
+            representantes.append(escolhida)
+        reservas = sorted(avulsas + representantes, key=lambda r: (r.date, r.start_time), reverse=True)
+
     spaces = Space.query.order_by(Space.name).all()
     ministries = Ministry.query.order_by(Ministry.name).all()
+
+    filters_display = dict(request.args)
+    filters_display["date_from"] = date_from
+    filters_display["date_to"] = date_to
+
     return render_template(
         "reservas_list.html",
         reservas=reservas, spaces=spaces, ministries=ministries,
         status_options=STATUS_RESERVA,
-        filters=request.args,
+        filters=request.args, filters_display=filters_display,
     )
 
 
@@ -359,6 +423,7 @@ def reserva_nova():
             payment_value=float(form.get("payment_value") or 0) if is_paid else 0.0,
             payment_proof_filename=proof_filename,
             payment_confirmed=form.get("payment_confirmed") == "on",
+            payment_paid_at=date.today().isoformat() if form.get("payment_confirmed") == "on" else "",
             status=form.get("status", "Confirmada"),
             notes=form.get("notes", "").strip(),
             created_by=current_user.name,
@@ -445,7 +510,12 @@ def reserva_editar(reserva_id):
         reserva.is_paid = is_paid
         reserva.payment_method = form.get("payment_method", "") if is_paid else ""
         reserva.payment_value = float(form.get("payment_value") or 0) if is_paid else 0.0
-        reserva.payment_confirmed = form.get("payment_confirmed") == "on"
+        novo_confirmado = form.get("payment_confirmed") == "on"
+        if novo_confirmado and not reserva.payment_confirmed:
+            reserva.payment_paid_at = date.today().isoformat()
+        elif not novo_confirmado:
+            reserva.payment_paid_at = ""
+        reserva.payment_confirmed = novo_confirmado
         reserva.status = form.get("status", "Confirmada")
         reserva.notes = form.get("notes", "").strip()
 
@@ -488,8 +558,11 @@ def espacos_list():
 @app.route("/espacos/novo", methods=["GET", "POST"])
 @login_required
 def espaco_novo():
+    outros_espacos = Space.query.order_by(Space.name).all()
     if request.method == "POST":
         form = request.form
+        is_composite = form.get("is_composite") == "on"
+        composite_ids = form.getlist("composite_of") if is_composite else []
         space = Space(
             name=form.get("name", "").strip(),
             space_type=form.get("space_type", "Outro"),
@@ -497,33 +570,46 @@ def espaco_novo():
             color=form.get("color", "#2563eb"),
             notes=form.get("notes", "").strip(),
             active=True,
+            is_composite=is_composite,
+            composite_of=",".join(composite_ids),
         )
         if not space.name:
             flash("Informe o nome do espaço.", "danger")
-            return render_template("espaco_form.html", space=None)
+            return render_template("espaco_form.html", space=None, outros_espacos=outros_espacos)
+        if is_composite and not composite_ids:
+            flash("Selecione ao menos um espaço que este pacote ocupa.", "danger")
+            return render_template("espaco_form.html", space=None, outros_espacos=outros_espacos)
         db.session.add(space)
         db.session.commit()
         flash("Espaço cadastrado.", "success")
         return redirect(url_for("espacos_list"))
-    return render_template("espaco_form.html", space=None)
+    return render_template("espaco_form.html", space=None, outros_espacos=outros_espacos)
 
 
 @app.route("/espacos/<int:space_id>/editar", methods=["GET", "POST"])
 @login_required
 def espaco_editar(space_id):
     space = Space.query.get_or_404(space_id)
+    outros_espacos = Space.query.filter(Space.id != space_id).order_by(Space.name).all()
     if request.method == "POST":
         form = request.form
+        is_composite = form.get("is_composite") == "on"
+        composite_ids = form.getlist("composite_of") if is_composite else []
+        if is_composite and not composite_ids:
+            flash("Selecione ao menos um espaço que este pacote ocupa.", "danger")
+            return render_template("espaco_form.html", space=space, outros_espacos=outros_espacos)
         space.name = form.get("name", "").strip()
         space.space_type = form.get("space_type", "Outro")
         space.activities = form.get("activities", "").strip()
         space.color = form.get("color", "#2563eb")
         space.notes = form.get("notes", "").strip()
         space.active = form.get("active") == "on"
+        space.is_composite = is_composite
+        space.composite_of = ",".join(composite_ids)
         db.session.commit()
         flash("Espaço atualizado.", "success")
         return redirect(url_for("espacos_list"))
-    return render_template("espaco_form.html", space=space)
+    return render_template("espaco_form.html", space=space, outros_espacos=outros_espacos)
 
 
 @app.route("/espacos/<int:space_id>/excluir", methods=["POST"])
@@ -709,6 +795,81 @@ def recorrente_encerrar(recorrente_id):
     return redirect(url_for("recorrente_detail", recorrente_id=recurring.id))
 
 
+@app.route("/cobrancas")
+@login_required
+def cobrancas_list():
+    topup_recurring_bookings()
+    view = request.args.get("view", "pendentes")
+    pagas = (view == "historico")
+
+    itens = []
+
+    bills = (MonthlyBill.query.join(RecurringBooking)
+             .filter(MonthlyBill.payment_confirmed == pagas)  # noqa: E712
+             .all())
+    for b in bills:
+        itens.append({
+            "tipo": "mensal",
+            "tipo_label": "Fixa · Mensal",
+            "responsavel": b.recurring_booking.requester_name,
+            "space": b.recurring_booking.space,
+            "referencia": b.month,
+            "valor": b.value,
+            "payment_method": b.payment_method,
+            "pago": b.payment_confirmed,
+            "pago_em": b.paid_at,
+            "comprovante": b.payment_proof_filename,
+            "link_dar_baixa": url_for("fatura_pagar", recorrente_id=b.recurring_booking_id, bill_id=b.id),
+            "link_editar": url_for("fatura_pagar", recorrente_id=b.recurring_booking_id, bill_id=b.id),
+            "link_ver": url_for("recorrente_detail", recorrente_id=b.recurring_booking_id),
+            "acao_rapida": False,
+            "ordenacao": b.month,
+        })
+
+    avulsas = (Reservation.query
+               .filter_by(is_paid=True, recurring_booking_id=None, payment_confirmed=pagas)
+               .all())
+    for r in avulsas:
+        itens.append({
+            "tipo": "avulsa",
+            "tipo_label": "Avulsa",
+            "responsavel": r.requester_name,
+            "space": r.space,
+            "referencia": r.date,
+            "valor": r.payment_value,
+            "payment_method": r.payment_method,
+            "pago": r.payment_confirmed,
+            "pago_em": r.payment_paid_at,
+            "comprovante": r.payment_proof_filename,
+            "link_dar_baixa": url_for("reserva_dar_baixa", reserva_id=r.id),
+            "link_editar": url_for("reserva_editar", reserva_id=r.id),
+            "link_ver": url_for("reserva_detail", reserva_id=r.id),
+            "acao_rapida": True,
+            "ordenacao": r.date,
+        })
+
+    itens.sort(key=lambda i: i["ordenacao"], reverse=True)
+    total = sum(i["valor"] for i in itens)
+
+    return render_template("cobrancas.html", itens=itens, view=view, total=total)
+
+
+@app.route("/reservas/<int:reserva_id>/dar-baixa", methods=["POST"])
+@login_required
+def reserva_dar_baixa(reserva_id):
+    reserva = Reservation.query.get_or_404(reserva_id)
+    if not reserva.is_paid:
+        flash("Esta reserva não está marcada como paga.", "warning")
+    elif reserva.payment_confirmed:
+        flash("Este pagamento já estava confirmado.", "info")
+    else:
+        reserva.payment_confirmed = True
+        reserva.payment_paid_at = date.today().isoformat()
+        db.session.commit()
+        flash("Pagamento dado como recebido.", "success")
+    return redirect(request.referrer or url_for("cobrancas_list"))
+
+
 @app.route("/recorrentes/<int:recorrente_id>/faturas/<int:bill_id>/pagar", methods=["GET", "POST"])
 @login_required
 def fatura_pagar(recorrente_id, bill_id):
@@ -870,10 +1031,46 @@ def run_light_migrations():
     inspector = inspect(db.engine)
     if inspector.has_table("reservation"):
         cols = {c["name"] for c in inspector.get_columns("reservation")}
-        if "recurring_booking_id" not in cols:
-            with db.engine.connect() as conn:
+        with db.engine.connect() as conn:
+            if "recurring_booking_id" not in cols:
                 conn.execute(text("ALTER TABLE reservation ADD COLUMN recurring_booking_id INTEGER"))
-                conn.commit()
+            if "payment_paid_at" not in cols:
+                conn.execute(text("ALTER TABLE reservation ADD COLUMN payment_paid_at VARCHAR(10) DEFAULT ''"))
+            conn.commit()
+    if inspector.has_table("space"):
+        cols = {c["name"] for c in inspector.get_columns("space")}
+        with db.engine.connect() as conn:
+            if "is_composite" not in cols:
+                conn.execute(text("ALTER TABLE space ADD COLUMN is_composite BOOLEAN DEFAULT 0"))
+            if "composite_of" not in cols:
+                conn.execute(text("ALTER TABLE space ADD COLUMN composite_of VARCHAR(255) DEFAULT ''"))
+            conn.commit()
+
+
+def ensure_composite_space():
+    """Garante a existência do espaço 'Pátio Completo': ao ser reservado, ocupa
+    Quadra de Cimento, Quadra de Areia e Churrasqueira ao mesmo tempo."""
+    if Space.query.filter_by(name="Pátio Completo").first():
+        return
+    nomes = ["Quadra de Cimento", "Quadra de Areia", "Churrasqueira"]
+    componentes = Space.query.filter(Space.name.in_(nomes)).all()
+    if not componentes:
+        return
+    ids = ",".join(str(s.id) for s in componentes)
+    atividades = sorted({a for s in componentes for a in s.activities_list()})
+    nomes_incluidos = ", ".join(s.name for s in componentes)
+    patio = Space(
+        name="Pátio Completo",
+        space_type="Outro",
+        activities=", ".join(atividades),
+        color="#2b2f2e",
+        active=True,
+        notes=f"Reserva conjunta: ocupa {nomes_incluidos} ao mesmo tempo.",
+        is_composite=True,
+        composite_of=ids,
+    )
+    db.session.add(patio)
+    db.session.commit()
 
 
 with app.app_context():
@@ -881,6 +1078,7 @@ with app.app_context():
     db.create_all()
     run_light_migrations()
     seed_data()
+    ensure_composite_space()
 
 
 if __name__ == "__main__":

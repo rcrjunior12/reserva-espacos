@@ -37,10 +37,17 @@ class Space(db.Model):
     active = db.Column(db.Boolean, default=True)
     notes = db.Column(db.String(255), default="")
 
+    # Espaço "pacote": ao ser reservado, ocupa também os espaços listados em composite_of.
+    is_composite = db.Column(db.Boolean, default=False)
+    composite_of = db.Column(db.String(255), default="")  # ids de Space separados por vírgula
+
     reservations = db.relationship("Reservation", backref="space", lazy=True)
 
     def activities_list(self):
         return [a.strip() for a in self.activities.split(",") if a.strip()]
+
+    def composite_ids_list(self):
+        return [int(x) for x in self.composite_of.split(",") if x.strip()]
 
 
 class Ministry(db.Model):
@@ -69,6 +76,7 @@ class Reservation(db.Model):
     payment_value = db.Column(db.Float, default=0.0)
     payment_proof_filename = db.Column(db.String(255), default="")
     payment_confirmed = db.Column(db.Boolean, default=False)
+    payment_paid_at = db.Column(db.String(10), default="")  # YYYY-MM-DD
 
     status = db.Column(db.String(20), default="Confirmada")
     notes = db.Column(db.Text, default="")

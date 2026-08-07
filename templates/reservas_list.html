@@ -46,14 +46,16 @@
     </div>
     <div class="col-6 col-md-2">
       <label class="form-label small mb-1">De</label>
-      <input type="date" name="date_from" class="form-control form-control-sm" value="{{ filters.get('date_from','') }}">
+      <input type="date" name="date_from" class="form-control form-control-sm" value="{{ filters_display.get('date_from','') }}">
     </div>
     <div class="col-6 col-md-2">
       <label class="form-label small mb-1">Até</label>
-      <input type="date" name="date_to" class="form-control form-control-sm" value="{{ filters.get('date_to','') }}">
+      <input type="date" name="date_to" class="form-control form-control-sm" value="{{ filters_display.get('date_to','') }}">
     </div>
-    <div class="col-12">
+    <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
       <button type="submit" class="btn btn-sm btn-outline-primary">Filtrar</button>
+      <button type="submit" name="periodo" value="mes_atual" class="btn btn-sm {{ 'btn-primary' if filters.get('periodo') == 'mes_atual' else 'btn-outline-secondary' }}">Mês atual</button>
+      <button type="submit" name="periodo" value="proximo_mes" class="btn btn-sm {{ 'btn-primary' if filters.get('periodo') == 'proximo_mes' else 'btn-outline-secondary' }}">Próximo mês</button>
       <a href="{{ url_for('reservas_list') }}" class="btn btn-sm btn-outline-secondary">Limpar</a>
     </div>
   </form>
@@ -71,13 +73,31 @@
         {% for r in reservas %}
         <tr class="reserva-row">
           <td onclick="window.location='{{ url_for('reserva_detail', reserva_id=r.id) }}'" style="cursor:pointer;">
+            {% if not filters.get('historico') and r.recurring_booking %}
+            <span class="badge text-bg-light text-dark border mb-1">Próxima</span><br>
+            {% endif %}
             {{ r.date }}<br><small class="text-muted">{{ r.start_time }}-{{ r.end_time }}</small>
           </td>
           <td><span class="badge-space" style="background:{{ r.space.color }}"></span>{{ r.space.name }}</td>
-          <td>{{ r.requester_name }}</td>
+          <td>
+            {{ r.requester_name }}
+            {% if not filters.get('historico') and r.recurring_booking %}
+            <div class="small text-muted mt-1">
+              <i class="bi bi-arrow-repeat me-1"></i>Reserva fixa • toda(s) {{ r.recurring_booking.weekdays_labels()|join(', ') }} • {{ r.recurring_booking.start_time }}–{{ r.recurring_booking.end_time }}
+            </div>
+            {% endif %}
+          </td>
           <td>{{ r.ministry.name if r.ministry else '—' }}</td>
           <td>
-            {% if r.is_paid %}
+            {% if r.recurring_booking and r.recurring_booking.billing_type == 'Mensal' %}
+              {% set bill = r.recurring_booking.bills|selectattr('month', 'equalto', r.date[:7])|first %}
+              <a href="{{ url_for('fatura_pagar', recorrente_id=r.recurring_booking.id, bill_id=bill.id) if bill else url_for('recorrente_detail', recorrente_id=r.recurring_booking.id) }}"
+                 class="badge text-decoration-none {{ 'text-bg-success' if bill and bill.payment_confirmed else 'text-bg-warning' }}">
+                Mensal {{ r.date[:7] }} • {{ 'Pago' if bill and bill.payment_confirmed else 'Pendente' }}
+              </a>
+            {% elif r.recurring_booking %}
+              <span class="badge text-bg-light text-dark border"><i class="bi bi-arrow-repeat me-1"></i>Fixa • Gratuita</span>
+            {% elif r.is_paid %}
               <span class="badge {{ 'text-bg-success' if r.payment_confirmed else 'text-bg-warning' }}">
                 {{ 'Pago' if r.payment_confirmed else 'Pendente' }} • R$ {{ '%.2f'|format(r.payment_value) }}
               </span>

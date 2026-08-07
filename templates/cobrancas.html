@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Cobranças{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="fw-semibold mb-0"><i class="bi bi-receipt me-1"></i>Cobranças</h5>
+</div>
+<p class="text-muted small mb-3">Reservas avulsas pagas e mensalidades de reservas fixas, num só lugar. Dê baixa quando o pagamento cair na conta.</p>
+
+<div class="card p-3 mb-3">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="btn-group btn-group-sm" role="group">
+      <a href="{{ url_for('cobrancas_list', view='pendentes') }}" class="btn {{ 'btn-primary' if view != 'historico' else 'btn-outline-primary' }}">
+        <i class="bi bi-hourglass-split me-1"></i>Pendentes
+      </a>
+      <a href="{{ url_for('cobrancas_list', view='historico') }}" class="btn {{ 'btn-primary' if view == 'historico' else 'btn-outline-primary' }}">
+        <i class="bi bi-clock-history me-1"></i>Histórico de pagamento
+      </a>
+    </div>
+    <span class="fw-semibold">
+      {{ 'Total pendente' if view != 'historico' else 'Total recebido' }}:
+      R$ {{ '%.2f'|format(total) }}
+    </span>
+  </div>
+</div>
+
+<div class="card p-0">
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Tipo</th><th>Responsável</th><th>Espaço</th><th>{{ 'Referência' }}</th><th>Valor</th>
+          {% if view == 'historico' %}<th>Pago em</th>{% endif %}
+          <th></th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for i in itens %}
+        <tr class="reserva-row">
+          <td>
+            {% if i.tipo == 'mensal' %}
+              <span class="badge text-bg-light text-dark border"><i class="bi bi-arrow-repeat me-1"></i>{{ i.tipo_label }}</span>
+            {% else %}
+              <span class="badge text-bg-light text-dark border">{{ i.tipo_label }}</span>
+            {% endif %}
+          </td>
+          <td><a href="{{ i.link_ver }}" class="text-decoration-none">{{ i.responsavel }}</a></td>
+          <td><span class="badge-space" style="background:{{ i.space.color }}"></span>{{ i.space.name }}</td>
+          <td>{{ i.referencia }}</td>
+          <td>R$ {{ '%.2f'|format(i.valor) }}</td>
+          {% if view == 'historico' %}
+          <td>
+            {{ i.pago_em or '—' }}
+            {% if i.comprovante %}
+            <a href="{{ url_for('uploaded_file', filename=i.comprovante) }}" target="_blank" class="ms-1"><i class="bi bi-paperclip"></i></a>
+            {% endif %}
+          </td>
+          {% endif %}
+          <td class="text-end">
+            {% if view != 'historico' %}
+              {% if i.acao_rapida %}
+              <form method="post" action="{{ i.link_dar_baixa }}" class="d-inline">
+                <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check2 me-1"></i>Dar baixa</button>
+              </form>
+              {% else %}
+              <a href="{{ i.link_dar_baixa }}" class="btn btn-sm btn-success"><i class="bi bi-check2 me-1"></i>Dar baixa</a>
+              {% endif %}
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <a href="{{ i.link_editar }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% if not itens %}
+<p class="text-muted mt-3">
+  {{ 'Nenhum pagamento pendente.' if view != 'historico' else 'Nenhum pagamento recebido ainda.' }}
+</p>
+{% endif %}
+{% endblock %}

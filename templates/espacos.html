@@ -15,11 +15,17 @@
           <span class="badge-space" style="background:{{ s.color }}"></span>
           <span class="fw-semibold">{{ s.name }}</span>
           {% if not s.active %}<span class="badge text-bg-secondary ms-1">Inativo</span>{% endif %}
+          {% if s.is_composite %}<span class="badge text-bg-light text-dark border ms-1"><i class="bi bi-collection me-1"></i>Pacote</span>{% endif %}
         </div>
         <a href="{{ url_for('espaco_editar', space_id=s.id) }}" class="text-muted"><i class="bi bi-pencil"></i></a>
       </div>
       <div class="small text-muted mt-1">Tipo: {{ s.space_type }}</div>
       {% if s.activities %}<div class="small text-muted">Atividades: {{ s.activities }}</div>{% endif %}
+      {% if s.is_composite %}
+      <div class="small text-muted mt-1">
+        Ocupa: {{ spaces|selectattr('id', 'in', s.composite_ids_list())|map(attribute='name')|join(', ') }}
+      </div>
+      {% endif %}
       {% if s.notes %}<div class="small text-muted mt-1">{{ s.notes }}</div>{% endif %}
       <div class="mt-2 d-flex gap-2">
         <a href="{{ url_for('reserva_nova', space_id=s.id) }}" class="btn btn-sm btn-outline-primary">Reservar</a>

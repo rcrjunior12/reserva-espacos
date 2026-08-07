@@ -34,10 +34,45 @@
       <label class="form-check-label" for="active">Espaço ativo (disponível para novas reservas)</label>
     </div>
     {% endif %}
+
+    <div class="form-check mb-2">
+      <input type="checkbox" name="is_composite" class="form-check-input" id="is_composite"
+             {% if space and space.is_composite %}checked{% endif %} onchange="togglePacote()">
+      <label class="form-check-label" for="is_composite">
+        Este espaço é um pacote <small class="text-muted">(ocupa outros espaços quando reservado, ex: "Pátio Completo")</small>
+      </label>
+    </div>
+    <div class="mb-3" id="pacote-espacos" style="display:none;">
+      <label class="form-label small">Quais espaços ficam ocupados junto com este?</label>
+      {% if outros_espacos %}
+        {% set composite_ids = space.composite_ids_list() if space else [] %}
+        <div class="row row-cols-2 g-1">
+          {% for e in outros_espacos %}
+          <div class="col">
+            <div class="form-check">
+              <input type="checkbox" name="composite_of" value="{{ e.id }}" class="form-check-input" id="comp-{{ e.id }}"
+                     {% if e.id in composite_ids %}checked{% endif %}>
+              <label class="form-check-label small" for="comp-{{ e.id }}">{{ e.name }}</label>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-muted small">Cadastre outros espaços primeiro para poder agrupá-los aqui.</p>
+      {% endif %}
+    </div>
+
     <div class="d-flex gap-2">
       <button type="submit" class="btn btn-primary">Salvar</button>
       <a href="{{ url_for('espacos_list') }}" class="btn btn-outline-secondary">Cancelar</a>
     </div>
   </form>
 </div>
+<script>
+  function togglePacote() {
+    const checked = document.getElementById('is_composite').checked;
+    document.getElementById('pacote-espacos').style.display = checked ? 'block' : 'none';
+  }
+  document.addEventListener('DOMContentLoaded', togglePacote);
+</script>
 {% endblock %}
