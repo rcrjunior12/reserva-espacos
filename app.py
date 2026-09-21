@@ -95,6 +95,7 @@ def dashboard():
         Reservation.query.filter_by(
             is_paid=True, payment_confirmed=False, recurring_booking_id=None
         )
+        .filter(Reservation.status != "Cancelada")
         .order_by(Reservation.date.asc())
         .all()
     )
@@ -347,6 +348,25 @@ def reservas_list():
             representantes.append(escolhida)
         reservas = sorted(avulsas + representantes, key=lambda r: (r.date, r.start_time), reverse=True)
 
+    # Para reservas conjuntas (vários espaços), anota os nomes dos outros espaços do grupo
+    # para exibir "reserva conjunta com..." na listagem, sem duplicar a lógica no template.
+    grupos_ids = {r.group_id for r in reservas if r.group_id}
+    outros_por_grupo = {}
+    if grupos_ids:
+        membros = (
+            Reservation.query.filter(Reservation.group_id.in_(grupos_ids))
+            .join(Space)
+            .order_by(Space.name)
+            .all()
+        )
+        for m in membros:
+            outros_por_grupo.setdefault(m.group_id, []).append(m)
+    for r in reservas:
+        if r.group_id:
+            r.outros_espacos_grupo = [m.space.name for m in outros_por_grupo.get(r.group_id, []) if m.id != r.id]
+        else:
+            r.outros_espacos_grupo = []
+
     spaces = Space.query.order_by(Space.name).all()
     ministries = Ministry.query.order_by(Ministry.name).all()
 
@@ -377,14 +397,14 @@ def reserva_nova():
 
     if request.method == "POST":
         form = request.form
-        space_id = form.get("space_id", type=int)
+        space_ids = sorted({int(x) for x in form.getlist("space_id") if x.strip().isdigit()})
         date_str = form.get("date", "")
         start_time = form.get("start_time", "")
         end_time = form.get("end_time", "")
 
         errors = []
-        if not space_id:
-            errors.append("Selecione um espaço.")
+        if not space_ids:
+            errors.append("Selecione ao menos um espaço.")
         if not date_str:
             errors.append("Informe a data.")
         if not start_time or not end_time:
@@ -394,14 +414,16 @@ def reserva_nova():
         if not form.get("requester_name", "").strip():
             errors.append("Informe o nome do responsável.")
 
-        conflict = None
-        if space_id and date_str and start_time and end_time and start_time < end_time:
-            conflict = check_conflict(space_id, date_str, start_time, end_time)
-            if conflict:
-                errors.append(
-                    f"Conflito de horário: {conflict.space.name} já está reservado por "
-                    f"{conflict.requester_name} das {conflict.start_time} às {conflict.end_time} nesse dia."
-                )
+        if space_ids and date_str and start_time and end_time and start_time < end_time:
+            for sid in space_ids:
+                conflict = check_conflict(sid, date_str, start_time, end_time)
+                if conflict:
+                    sp = Space.query.get(sid)
+                    errors.append(
+                        f"Conflito de horário em {sp.name if sp else 'espaço selecionado'}: já reservado por "
+                        f"{conflict.requester_name} das {conflict.start_time} às {conflict.end_time} "
+                        f"(via {conflict.space.name}) nesse dia."
+                    )
 
         if errors:
             for e in errors:
@@ -410,6 +432,7 @@ def reserva_nova():
                 "reserva_form.html", spaces=spaces, ministries=ministries,
                 formas=FORMAS_PAGAMENTO, status_options=STATUS_RESERVA,
                 reserva=None, form=form,
+                selected_space_ids=[str(x) for x in space_ids],
             )
 
         is_paid = form.get("is_paid") == "on"
@@ -420,29 +443,55 @@ def reserva_nova():
             file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
             proof_filename = filename
 
-        reserva = Reservation(
-            space_id=space_id,
-            ministry_id=form.get("ministry_id", type=int) or None,
-            requester_name=form.get("requester_name", "").strip(),
-            requester_contact=form.get("requester_contact", "").strip(),
-            activity=form.get("activity", "").strip(),
-            date=date_str,
-            start_time=start_time,
-            end_time=end_time,
-            is_paid=is_paid,
-            payment_method=form.get("payment_method", "") if is_paid else "",
-            payment_value=float(form.get("payment_value") or 0) if is_paid else 0.0,
-            payment_proof_filename=proof_filename,
-            payment_confirmed=form.get("payment_confirmed") == "on",
-            payment_paid_at=date.today().isoformat() if form.get("payment_confirmed") == "on" else "",
-            status=form.get("status", "Confirmada"),
-            notes=form.get("notes", "").strip(),
-            created_by=current_user.name,
-        )
-        db.session.add(reserva)
+        ministry_id = form.get("ministry_id", type=int) or None
+        requester_name = form.get("requester_name", "").strip()
+        requester_contact = form.get("requester_contact", "").strip()
+        activity = form.get("activity", "").strip()
+        status_val = form.get("status", "Confirmada")
+        notes = form.get("notes", "").strip()
+        payment_method = form.get("payment_method", "") if is_paid else ""
+        payment_value = float(form.get("payment_value") or 0) if is_paid else 0.0
+        payment_confirmed = form.get("payment_confirmed") == "on"
+        payment_paid_at = date.today().isoformat() if payment_confirmed else ""
+
+        multi = len(space_ids) > 1
+        criadas = []
+        for idx, sid in enumerate(space_ids):
+            principal = idx == 0
+            r = Reservation(
+                space_id=sid,
+                ministry_id=ministry_id,
+                requester_name=requester_name,
+                requester_contact=requester_contact,
+                activity=activity,
+                date=date_str,
+                start_time=start_time,
+                end_time=end_time,
+                is_paid=is_paid if principal else False,
+                payment_method=payment_method if principal else "",
+                payment_value=payment_value if principal else 0.0,
+                payment_proof_filename=proof_filename if principal else "",
+                payment_confirmed=payment_confirmed if principal else False,
+                payment_paid_at=payment_paid_at if principal else "",
+                status=status_val,
+                notes=notes,
+                created_by=current_user.name,
+            )
+            db.session.add(r)
+            criadas.append(r)
+
+        db.session.flush()
+        if multi:
+            group_id = criadas[0].id
+            for r in criadas:
+                r.group_id = group_id
+
         db.session.commit()
-        flash("Reserva criada com sucesso.", "success")
-        return redirect(url_for("reserva_detail", reserva_id=reserva.id))
+        if multi:
+            flash(f"Reserva conjunta criada em {len(criadas)} espaços. O valor informado foi registrado na reserva principal.", "success")
+        else:
+            flash("Reserva criada com sucesso.", "success")
+        return redirect(url_for("reserva_detail", reserva_id=criadas[0].id))
 
     prefill_date = request.args.get("date", "")
     prefill_space = request.args.get("space_id", "")
@@ -450,7 +499,8 @@ def reserva_nova():
         "reserva_form.html", spaces=spaces, ministries=ministries,
         formas=FORMAS_PAGAMENTO, status_options=STATUS_RESERVA,
         reserva=None,
-        form={"date": prefill_date, "space_id": prefill_space, "status": "Confirmada"},
+        form={"date": prefill_date, "status": "Confirmada"},
+        selected_space_ids=[prefill_space] if prefill_space else [],
     )
 
 
@@ -458,7 +508,15 @@ def reserva_nova():
 @login_required
 def reserva_detail(reserva_id):
     reserva = Reservation.query.get_or_404(reserva_id)
-    return render_template("reserva_detail.html", reserva=reserva)
+    grupo = []
+    if reserva.group_id:
+        grupo = (
+            Reservation.query.filter(Reservation.group_id == reserva.group_id, Reservation.id != reserva.id)
+            .join(Space)
+            .order_by(Space.name)
+            .all()
+        )
+    return render_template("reserva_detail.html", reserva=reserva, grupo=grupo, status_options=STATUS_RESERVA)
 
 
 @app.route("/reservas/<int:reserva_id>/editar", methods=["GET", "POST"])
@@ -545,10 +603,34 @@ def reserva_editar(reserva_id):
 @login_required
 def reserva_excluir(reserva_id):
     reserva = Reservation.query.get_or_404(reserva_id)
-    db.session.delete(reserva)
-    db.session.commit()
-    flash("Reserva excluída.", "info")
+    if reserva.group_id and reserva.group_id == reserva.id:
+        # É a reserva principal de uma reserva conjunta: remove o grupo inteiro,
+        # para não deixar as outras reservas "fantasmas" ocupando os demais espaços.
+        grupo = Reservation.query.filter_by(group_id=reserva.group_id).all()
+        qtd = len(grupo)
+        for r in grupo:
+            db.session.delete(r)
+        db.session.commit()
+        flash(f"Reserva conjunta excluída ({qtd} espaço(s)).", "info")
+    else:
+        db.session.delete(reserva)
+        db.session.commit()
+        flash("Reserva excluída.", "info")
     return redirect(url_for("reservas_list"))
+
+
+@app.route("/reservas/<int:reserva_id>/status", methods=["POST"])
+@login_required
+def reserva_status(reserva_id):
+    reserva = Reservation.query.get_or_404(reserva_id)
+    novo_status = request.form.get("status", "")
+    if novo_status not in STATUS_RESERVA:
+        flash("Status inválido.", "danger")
+    else:
+        reserva.status = novo_status
+        db.session.commit()
+        flash("Status atualizado.", "success")
+    return redirect(request.referrer or url_for("reservas_list"))
 
 
 @app.route("/uploads/<path:filename>")
@@ -857,7 +939,10 @@ def cobrancas_list():
             "ordenacao": b.month,
         })
 
-    avulsas_q = Reservation.query.filter_by(is_paid=True, recurring_booking_id=None, payment_confirmed=pagas)
+    avulsas_q = (
+        Reservation.query.filter_by(is_paid=True, recurring_booking_id=None, payment_confirmed=pagas)
+        .filter(Reservation.status != "Cancelada")
+    )
     if not pagas:
         avulsas_q = avulsas_q.filter(Reservation.date <= fim_mes_atual.isoformat())
     avulsas = avulsas_q.all()
@@ -1115,6 +1200,8 @@ def run_light_migrations():
                 conn.execute(text("ALTER TABLE reservation ADD COLUMN recurring_booking_id INTEGER"))
             if "payment_paid_at" not in cols:
                 conn.execute(text("ALTER TABLE reservation ADD COLUMN payment_paid_at VARCHAR(10) DEFAULT ''"))
+            if "group_id" not in cols:
+                conn.execute(text("ALTER TABLE reservation ADD COLUMN group_id INTEGER"))
             conn.commit()
     if inspector.has_table("space"):
         cols = {c["name"] for c in inspector.get_columns("space")}

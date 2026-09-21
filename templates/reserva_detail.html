@@ -6,12 +6,38 @@
     <div>
       <span class="badge-space" style="background:{{ reserva.space.color }}"></span>
       <span class="fs-5 fw-semibold">{{ reserva.space.name }}</span>
-      {% if reserva.status == 'Confirmada' %}<span class="badge text-bg-success ms-2">Confirmada</span>
-      {% elif reserva.status == 'Pendente' %}<span class="badge text-bg-warning ms-2">Pendente</span>
-      {% else %}<span class="badge text-bg-secondary ms-2">Cancelada</span>{% endif %}
     </div>
     <a href="{{ url_for('reserva_editar', reserva_id=reserva.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> Editar</a>
   </div>
+
+  <div class="mt-2">
+    <label class="form-label small text-muted mb-1">Status</label>
+    <form method="post" action="{{ url_for('reserva_status', reserva_id=reserva.id) }}">
+      <select name="status" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()">
+        <option value="Confirmada" {% if reserva.status == 'Confirmada' %}selected{% endif %}>Confirmada</option>
+        <option value="Pendente" {% if reserva.status == 'Pendente' %}selected{% endif %}>Pendente</option>
+        <option value="Cancelada" {% if reserva.status == 'Cancelada' %}selected{% endif %}>Não acontecerá</option>
+      </select>
+    </form>
+  </div>
+
+  {% if grupo %}
+  <div class="alert alert-light border d-flex align-items-start gap-2 py-2 px-3 mb-3 mt-3">
+    <i class="bi bi-diagram-3 mt-1"></i>
+    <div class="small">
+      <strong>Reserva conjunta.</strong> Esta é a reserva principal — o pagamento cobre todos os espaços juntos.
+      Também ocupa: {% for g in grupo %}<a href="{{ url_for('reserva_detail', reserva_id=g.id) }}">{{ g.space.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}.
+    </div>
+  </div>
+  {% elif reserva.group_id %}
+  <div class="alert alert-light border d-flex align-items-start gap-2 py-2 px-3 mb-3 mt-3">
+    <i class="bi bi-diagram-3 mt-1"></i>
+    <div class="small">
+      Esta reserva faz parte de uma <strong>reserva conjunta</strong>. O pagamento está registrado na reserva principal.
+      <a href="{{ url_for('reserva_detail', reserva_id=reserva.group_id) }}">Ver reserva principal</a>
+    </div>
+  </div>
+  {% endif %}
 
   {% if reserva.recurring_booking %}
   <div class="alert alert-light border d-flex align-items-center gap-2 py-2 px-3 mb-3">
@@ -44,6 +70,8 @@
     <dd class="col-7 col-md-8">
       {% if reserva.recurring_booking and reserva.recurring_booking.billing_type == 'Mensal' %}
         Parte da mensalidade da reserva fixa (R$ {{ '%.2f'|format(reserva.recurring_booking.monthly_value) }}/mês)
+      {% elif reserva.group_id and reserva.group_id != reserva.id %}
+        Coberto pelo pagamento da reserva principal
       {% elif reserva.is_paid %}
         Pago • {{ reserva.payment_method or 'forma não informada' }} • R$ {{ '%.2f'|format(reserva.payment_value) }}
         {% if reserva.payment_confirmed %}<span class="badge text-bg-success ms-1">Recebido</span>

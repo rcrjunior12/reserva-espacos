@@ -86,6 +86,11 @@ class Reservation(db.Model):
 
     recurring_booking_id = db.Column(db.Integer, db.ForeignKey("recurring_booking.id"), nullable=True)
 
+    # Reserva conjunta (vários espaços ao mesmo tempo, ex: Pátio inteiro escolhido na hora).
+    # group_id aponta para o id da própria reserva "principal" (que carrega o pagamento);
+    # as demais reservas do grupo têm o mesmo group_id, mas espaços diferentes.
+    group_id = db.Column(db.Integer, nullable=True)
+
     def datetime_range_str(self):
         return f"{self.date} {self.start_time} - {self.end_time}"
 

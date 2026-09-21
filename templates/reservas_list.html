@@ -86,6 +86,11 @@
               <i class="bi bi-arrow-repeat me-1"></i>Reserva fixa • toda(s) {{ r.recurring_booking.weekdays_labels()|join(', ') }} • {{ r.recurring_booking.start_time }}–{{ r.recurring_booking.end_time }}
             </div>
             {% endif %}
+            {% if r.outros_espacos_grupo %}
+            <div class="small text-muted mt-1">
+              <i class="bi bi-diagram-3 me-1"></i>Reserva conjunta com: {{ r.outros_espacos_grupo|join(', ') }}
+            </div>
+            {% endif %}
           </td>
           <td>{{ r.ministry.name if r.ministry else '—' }}</td>
           <td>
@@ -97,6 +102,10 @@
               </a>
             {% elif r.recurring_booking %}
               <span class="badge text-bg-light text-dark border"><i class="bi bi-arrow-repeat me-1"></i>Fixa • Gratuita</span>
+            {% elif r.group_id and r.group_id != r.id %}
+              <a href="{{ url_for('reserva_detail', reserva_id=r.group_id) }}" class="badge text-decoration-none text-bg-light text-dark border">
+                <i class="bi bi-diagram-3 me-1"></i>Ver reserva principal
+              </a>
             {% elif r.is_paid %}
               <span class="badge {{ 'text-bg-success' if r.payment_confirmed else 'text-bg-warning' }}">
                 {{ 'Pago' if r.payment_confirmed else 'Pendente' }} • R$ {{ '%.2f'|format(r.payment_value) }}
@@ -106,9 +115,19 @@
             {% endif %}
           </td>
           <td>
-            {% if r.status == 'Confirmada' %}<span class="badge text-bg-success">Confirmada</span>
-            {% elif r.status == 'Pendente' %}<span class="badge text-bg-warning">Pendente</span>
-            {% else %}<span class="badge text-bg-secondary">Cancelada</span>{% endif %}
+            {% if filters.get('historico') %}
+              {% if r.status == 'Confirmada' %}<span class="badge text-bg-success">Confirmada</span>
+              {% elif r.status == 'Pendente' %}<span class="badge text-bg-warning">Pendente</span>
+              {% else %}<span class="badge text-bg-secondary">Não acontecerá</span>{% endif %}
+            {% else %}
+              <form method="post" action="{{ url_for('reserva_status', reserva_id=r.id) }}" onclick="event.stopPropagation();">
+                <select name="status" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()">
+                  <option value="Confirmada" {% if r.status == 'Confirmada' %}selected{% endif %}>Confirmada</option>
+                  <option value="Pendente" {% if r.status == 'Pendente' %}selected{% endif %}>Pendente</option>
+                  <option value="Cancelada" {% if r.status == 'Cancelada' %}selected{% endif %}>Não acontecerá</option>
+                </select>
+              </form>
+            {% endif %}
           </td>
           <td class="text-end">
             <a href="{{ url_for('reserva_editar', reserva_id=r.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>

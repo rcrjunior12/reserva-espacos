@@ -7,6 +7,7 @@
   <form method="post" enctype="multipart/form-data">
     <div class="row g-3">
       <div class="col-md-6">
+        {% if reserva %}
         <label class="form-label">Espaço *</label>
         <select name="space_id" id="space_id" class="form-select" required onchange="updateActivities()">
           <option value="">Selecione...</option>
@@ -18,6 +19,27 @@
           </option>
           {% endfor %}
         </select>
+        {% if reserva.group_id %}
+        <small class="text-muted">Esta reserva faz parte de uma reserva conjunta. Editar aqui altera só este espaço.</small>
+        {% endif %}
+        {% else %}
+        <label class="form-label">Espaço(s) *</label>
+        <div class="border rounded p-2" style="max-height:180px; overflow-y:auto;">
+          {% for s in spaces %}
+          <div class="form-check">
+            <input type="checkbox" class="form-check-input space-checkbox" name="space_id" value="{{ s.id }}"
+                   id="space-{{ s.id }}" data-activities="{{ s.activities_list()|join(',') }}"
+                   onchange="updateActivities(); toggleMultiHint();"
+                   {% if s.id|string in (selected_space_ids|default([])) %}checked{% endif %}>
+            <label class="form-check-label" for="space-{{ s.id }}">{{ s.name }}</label>
+          </div>
+          {% endfor %}
+        </div>
+        <small class="text-muted">Selecione mais de um espaço para uma reserva conjunta (ex: Pátio inteiro).</small>
+        <div id="multi-hint" class="alert alert-light border small mt-2 py-1 px-2 mb-0" style="display:none;">
+          <i class="bi bi-info-circle me-1"></i>Reserva conjunta: o valor abaixo é o <strong>total combinado</strong> pelos espaços selecionados, não por espaço.
+        </div>
+        {% endif %}
       </div>
       <div class="col-md-6">
         <label class="form-label">Atividade</label>
@@ -86,7 +108,7 @@
           </select>
         </div>
         <div class="col-md-4">
-          <label class="form-label">Valor (R$)</label>
+          <label class="form-label">Valor (R$) {% if not reserva %}<small class="text-muted">— total, se for mais de um espaço</small>{% endif %}</label>
           <input type="number" step="0.01" min="0" name="payment_value" class="form-control" value="{{ f.payment_value if f and f.payment_value else '' }}">
         </div>
         <div class="col-md-4 d-flex align-items-end">
@@ -125,9 +147,19 @@ function togglePayment() {
     document.getElementById('is_paid').checked ? 'flex' : 'none';
 }
 function updateActivities() {
-  const select = document.getElementById('space_id');
-  const opt = select.options[select.selectedIndex];
-  const list = (opt && opt.dataset.activities) ? opt.dataset.activities.split(',') : [];
+  const boxes = document.querySelectorAll('.space-checkbox:checked');
+  let list = [];
+  if (boxes.length) {
+    boxes.forEach(b => {
+      (b.dataset.activities || '').split(',').forEach(a => { if (a && !list.includes(a)) list.push(a); });
+    });
+  } else {
+    const select = document.getElementById('space_id');
+    if (select) {
+      const opt = select.options[select.selectedIndex];
+      list = (opt && opt.dataset.activities) ? opt.dataset.activities.split(',') : [];
+    }
+  }
   const datalist = document.getElementById('activity-options');
   datalist.innerHTML = '';
   list.forEach(a => {
@@ -137,9 +169,15 @@ function updateActivities() {
     datalist.appendChild(o);
   });
 }
+function toggleMultiHint() {
+  const boxes = document.querySelectorAll('.space-checkbox:checked');
+  const hint = document.getElementById('multi-hint');
+  if (hint) hint.style.display = boxes.length > 1 ? 'block' : 'none';
+}
 document.addEventListener('DOMContentLoaded', () => {
   togglePayment();
   updateActivities();
+  toggleMultiHint();
 });
 </script>
 {% endblock %}
