@@ -54,6 +54,8 @@ class Ministry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False, unique=True)
     active = db.Column(db.Boolean, default=True)
+    leader_name = db.Column(db.String(120), default="")
+    leader_whatsapp = db.Column(db.String(30), default="")
 
     reservations = db.relationship("Reservation", backref="ministry", lazy=True)
 

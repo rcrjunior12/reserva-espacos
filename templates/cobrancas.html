@@ -6,13 +6,13 @@
 </div>
 <p class="text-muted small mb-3">
   Reservas avulsas pagas e mensalidades de reservas fixas, num só lugar. Dê baixa quando o pagamento cair na conta.
-  {% if view != 'historico' %}<br><span class="fst-italic">Mostrando pendências do mês atual e de meses anteriores — cobranças de meses futuros ainda não aparecem aqui.</span>{% endif %}
+  {% if view != 'historico' %}<br><span class="fst-italic">Mostrando as pendências do mês selecionado. Navegue para ver outros meses.</span>{% endif %}
 </p>
 
 <div class="card p-3 mb-3">
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div class="btn-group btn-group-sm" role="group">
-      <a href="{{ url_for('cobrancas_list', view='pendentes') }}" class="btn {{ 'btn-primary' if view != 'historico' else 'btn-outline-primary' }}">
+      <a href="{{ url_for('cobrancas_list', view='pendentes', mes=mes_selecionado) }}" class="btn {{ 'btn-primary' if view != 'historico' else 'btn-outline-primary' }}">
         <i class="bi bi-hourglass-split me-1"></i>Pendentes
       </a>
       <a href="{{ url_for('cobrancas_list', view='historico') }}" class="btn {{ 'btn-primary' if view == 'historico' else 'btn-outline-primary' }}">
@@ -24,10 +24,26 @@
       R$ {{ '%.2f'|format(total) }}
     </span>
   </div>
+
+  {% if view != 'historico' %}
+  <div class="d-flex justify-content-center align-items-center gap-3 mt-3 pt-3 border-top">
+    <a href="{{ url_for('cobrancas_list', view='pendentes', mes=mes_anterior) }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-chevron-left"></i>
+    </a>
+    <span class="fw-semibold" style="min-width: 140px; text-align:center;">{{ mes_selecionado_label }}</span>
+    <a href="{{ url_for('cobrancas_list', view='pendentes', mes=mes_seguinte) }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-chevron-right"></i>
+    </a>
+    {% if mes_selecionado != mes_atual %}
+    <a href="{{ url_for('cobrancas_list', view='pendentes', mes=mes_atual) }}" class="btn btn-sm btn-link">Voltar pro mês atual</a>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 
 <form method="post" action="{{ url_for('cobrancas_dar_baixa_lote') }}" id="cobrancas-form">
   <input type="hidden" name="view" value="{{ view }}">
+  <input type="hidden" name="mes" value="{{ mes_selecionado }}">
 
   {% if view != 'historico' and itens %}
   <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
@@ -93,7 +109,7 @@
 </form>
 {% if not itens %}
 <p class="text-muted mt-3">
-  {{ 'Nenhum pagamento pendente.' if view != 'historico' else 'Nenhum pagamento recebido ainda.' }}
+  {{ 'Nenhum pagamento pendente em ' + mes_selecionado_label + '.' if view != 'historico' else 'Nenhum pagamento recebido ainda.' }}
 </p>
 {% endif %}
 {% endblock %}

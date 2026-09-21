@@ -11,8 +11,21 @@
     {% for m in ministries %}
     <li class="list-group-item d-flex justify-content-between align-items-center">
       <div>
-        {{ m.name }}
-        {% if not m.active %}<span class="badge text-bg-secondary ms-1">Inativo</span>{% endif %}
+        <div>
+          {{ m.name }}
+          {% if not m.active %}<span class="badge text-bg-secondary ms-1">Inativo</span>{% endif %}
+        </div>
+        {% if m.leader_name or m.leader_whatsapp %}
+        <div class="small text-muted mt-1">
+          {% if m.leader_name %}<i class="bi bi-person me-1"></i>{{ m.leader_name }}{% endif %}
+          {% if m.leader_whatsapp %}
+          <a href="https://wa.me/{{ m.leader_whatsapp|replace(' ','')|replace('(','')|replace(')','')|replace('-','')|replace('+','') }}"
+             target="_blank" class="text-decoration-none ms-2">
+            <i class="bi bi-whatsapp me-1"></i>{{ m.leader_whatsapp }}
+          </a>
+          {% endif %}
+        </div>
+        {% endif %}
       </div>
       <div class="d-flex gap-2">
         <a href="{{ url_for('ministerio_editar', ministry_id=m.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>

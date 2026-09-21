@@ -198,6 +198,26 @@ def limites_mes(ref=None):
     return inicio, fim
 
 
+MESES_PT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+
+
+def mes_label(mes_str):
+    """Formata 'YYYY-MM' como 'Mês/AAAA' em português."""
+    try:
+        ano, mes = mes_str.split("-")
+        return f"{MESES_PT[int(mes) - 1]}/{ano}"
+    except (ValueError, IndexError):
+        return mes_str
+
+
+def mes_adjacente(mes_str, delta):
+    """Retorna o mês 'YYYY-MM' delta meses antes/depois de mes_str."""
+    ano, mes = (int(x) for x in mes_str.split("-"))
+    total = ano * 12 + (mes - 1) + delta
+    return f"{total // 12}-{(total % 12) + 1:02d}"
+
+
 # Quantos dias para frente a agenda de uma reserva fixa é gerada de cada vez.
 RECURRING_GENERATE_DAYS = 90
 # Quando faltar menos que isso de agenda gerada, estende automaticamente.
@@ -732,17 +752,19 @@ def ministerios_list():
 def ministerio_novo():
     if request.method == "POST":
         name = request.form.get("name", "").strip()
+        leader_name = request.form.get("leader_name", "").strip()
+        leader_whatsapp = request.form.get("leader_whatsapp", "").strip()
         if not name:
             flash("Informe o nome do ministério.", "danger")
-            return render_template("ministerio_form.html", ministry=None)
+            return render_template("ministerio_form.html", ministry=None, form=request.form)
         if Ministry.query.filter_by(name=name).first():
             flash("Já existe um ministério com esse nome.", "danger")
-            return render_template("ministerio_form.html", ministry=None)
-        db.session.add(Ministry(name=name))
+            return render_template("ministerio_form.html", ministry=None, form=request.form)
+        db.session.add(Ministry(name=name, leader_name=leader_name, leader_whatsapp=leader_whatsapp))
         db.session.commit()
         flash("Ministério cadastrado.", "success")
         return redirect(url_for("ministerios_list"))
-    return render_template("ministerio_form.html", ministry=None)
+    return render_template("ministerio_form.html", ministry=None, form=None)
 
 
 @app.route("/ministerios/<int:ministry_id>/editar", methods=["GET", "POST"])
@@ -751,11 +773,13 @@ def ministerio_editar(ministry_id):
     ministry = Ministry.query.get_or_404(ministry_id)
     if request.method == "POST":
         ministry.name = request.form.get("name", "").strip()
+        ministry.leader_name = request.form.get("leader_name", "").strip()
+        ministry.leader_whatsapp = request.form.get("leader_whatsapp", "").strip()
         ministry.active = request.form.get("active") == "on"
         db.session.commit()
         flash("Ministério atualizado.", "success")
         return redirect(url_for("ministerios_list"))
-    return render_template("ministerio_form.html", ministry=ministry)
+    return render_template("ministerio_form.html", ministry=ministry, form=None)
 
 
 @app.route("/ministerios/<int:ministry_id>/excluir", methods=["POST"])
@@ -910,15 +934,25 @@ def cobrancas_list():
     pagas = (view == "historico")
 
     mes_atual = date.today().strftime("%Y-%m")
-    _, fim_mes_atual = limites_mes()
+    mes_selecionado = request.args.get("mes", mes_atual)
+    # valida o formato; se vier algo estranho, volta pro mês atual
+    try:
+        ano_ref, mes_ref = (int(x) for x in mes_selecionado.split("-"))
+        date(ano_ref, mes_ref, 1)
+    except (ValueError, TypeError):
+        mes_selecionado = mes_atual
+
+    inicio_mes_sel, fim_mes_sel = limites_mes(date(*(int(x) for x in mes_selecionado.split("-")), 1))
+    mes_anterior = mes_adjacente(mes_selecionado, -1)
+    mes_seguinte = mes_adjacente(mes_selecionado, 1)
 
     itens = []
 
     bills_q = MonthlyBill.query.join(RecurringBooking).filter(MonthlyBill.payment_confirmed == pagas)  # noqa: E712
     if not pagas:
-        # Cobranças pendentes: só mostra o mês atual e meses anteriores (o que já venceu ou está vencendo).
-        # Faturas de meses futuros (geradas com antecedência) ainda não devem aparecer como pendência.
-        bills_q = bills_q.filter(MonthlyBill.month <= mes_atual)
+        # Cobranças pendentes: mostra só o mês selecionado (atual por padrão).
+        # Navegue para meses anteriores/seguintes para ver outras cobranças.
+        bills_q = bills_q.filter(MonthlyBill.month == mes_selecionado)
     bills = bills_q.all()
     for b in bills:
         itens.append({
@@ -944,7 +978,10 @@ def cobrancas_list():
         .filter(Reservation.status != "Cancelada")
     )
     if not pagas:
-        avulsas_q = avulsas_q.filter(Reservation.date <= fim_mes_atual.isoformat())
+        avulsas_q = avulsas_q.filter(
+            Reservation.date >= inicio_mes_sel.isoformat(),
+            Reservation.date <= fim_mes_sel.isoformat(),
+        )
     avulsas = avulsas_q.all()
     for r in avulsas:
         itens.append({
@@ -968,7 +1005,12 @@ def cobrancas_list():
     itens.sort(key=lambda i: i["ordenacao"], reverse=True)
     total = sum(i["valor"] for i in itens)
 
-    return render_template("cobrancas.html", itens=itens, view=view, total=total)
+    return render_template(
+        "cobrancas.html", itens=itens, view=view, total=total,
+        mes_selecionado=mes_selecionado, mes_atual=mes_atual,
+        mes_anterior=mes_anterior, mes_seguinte=mes_seguinte,
+        mes_selecionado_label=mes_label(mes_selecionado),
+    )
 
 
 @app.route("/reservas/<int:reserva_id>/dar-baixa", methods=["POST"])
@@ -1031,7 +1073,11 @@ def cobrancas_dar_baixa_lote():
         flash(f"{count} pagamento(s) dado(s) como recebido(s).", "success")
     else:
         flash("Nenhum item selecionado (ou já estava pago).", "warning")
-    return redirect(url_for("cobrancas_list", view=request.form.get("view", "pendentes")))
+    return redirect(url_for(
+        "cobrancas_list",
+        view=request.form.get("view", "pendentes"),
+        mes=request.form.get("mes") or None,
+    ))
 
 
 @app.route("/recorrentes/<int:recorrente_id>/faturas/<int:bill_id>/pagar", methods=["GET", "POST"])
@@ -1210,6 +1256,14 @@ def run_light_migrations():
                 conn.execute(text("ALTER TABLE space ADD COLUMN is_composite BOOLEAN DEFAULT 0"))
             if "composite_of" not in cols:
                 conn.execute(text("ALTER TABLE space ADD COLUMN composite_of VARCHAR(255) DEFAULT ''"))
+            conn.commit()
+    if inspector.has_table("ministry"):
+        cols = {c["name"] for c in inspector.get_columns("ministry")}
+        with db.engine.connect() as conn:
+            if "leader_name" not in cols:
+                conn.execute(text("ALTER TABLE ministry ADD COLUMN leader_name VARCHAR(120) DEFAULT ''"))
+            if "leader_whatsapp" not in cols:
+                conn.execute(text("ALTER TABLE ministry ADD COLUMN leader_whatsapp VARCHAR(30) DEFAULT ''"))
             conn.commit()
 
 

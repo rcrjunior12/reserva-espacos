@@ -1,12 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Ministério{% endblock %}
 {% block content %}
+{% set f = form or ministry %}
 <div class="card p-3 p-lg-4 mx-auto" style="max-width: 480px;">
   <h5 class="fw-semibold mb-3">{{ 'Editar ministério' if ministry else 'Novo ministério' }}</h5>
   <form method="post">
     <div class="mb-3">
       <label class="form-label">Nome</label>
-      <input type="text" name="name" class="form-control" required value="{{ ministry.name if ministry else '' }}" placeholder="Ex: Louvor, Jovens, Crianças...">
+      <input type="text" name="name" class="form-control" required value="{{ f.name if f else '' }}" placeholder="Ex: Louvor, Jovens, Crianças...">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Nome do líder</label>
+      <input type="text" name="leader_name" class="form-control" value="{{ f.leader_name if f else '' }}" placeholder="Ex: Maria Silva">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">WhatsApp do líder</label>
+      <input type="text" name="leader_whatsapp" class="form-control" value="{{ f.leader_whatsapp if f else '' }}" placeholder="Ex: (11) 99999-9999">
     </div>
     {% if ministry %}
     <div class="form-check mb-3">
