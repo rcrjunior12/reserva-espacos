@@ -63,9 +63,9 @@
     <div class="card p-3 h-100">
       <h6 class="fw-semibold mb-2">{{ item.nome }}</h6>
       <div class="table-responsive">
-        <table class="table table-sm mb-0">
+        <table class="table table-sm align-middle mb-0">
           <thead class="text-muted small">
-            <tr><th>Mês</th><th>Leitura</th><th>kWh</th><th>Custo</th></tr>
+            <tr><th>Mês</th><th>Leitura</th><th>kWh</th><th>Custo</th><th>Status</th><th></th></tr>
           </thead>
           <tbody>
             {% for linha in item.linhas %}
@@ -74,6 +74,32 @@
               <td>{{ linha.leitura if linha.leitura is not none else '—' }}</td>
               <td>{{ '%.1f'|format(linha.kwh) if linha.kwh is not none else '—' }}</td>
               <td>{{ 'R$ %.2f'|format(linha.custo) if linha.custo is not none else '—' }}</td>
+              <td>
+                {% if linha.tem_dados %}
+                  {% if linha.pago %}
+                  <span class="badge text-bg-success">Pago em {{ linha.paid_at }}</span>
+                  {% else %}
+                  <span class="badge text-bg-warning">Pendente</span>
+                  {% endif %}
+                {% else %}
+                —
+                {% endif %}
+              </td>
+              <td class="text-end text-nowrap">
+                {% if linha.tem_dados %}
+                <a href="{{ linha.pdf_url }}" class="btn btn-sm btn-outline-secondary" title="Gerar conta em PDF">
+                  <i class="bi bi-file-earmark-pdf"></i>
+                </a>
+                {% if not linha.pago %}
+                <form method="post" action="{{ linha.pagar_url }}" class="d-inline"
+                      onsubmit="return confirm('Confirmar pagamento da conta de {{ item.nome }} ({{ linha.mes_label }})?');">
+                  <button type="submit" class="btn btn-sm btn-outline-success" title="Dar baixa">
+                    <i class="bi bi-check2"></i>
+                  </button>
+                </form>
+                {% endif %}
+                {% endif %}
+              </td>
             </tr>
             {% endfor %}
           </tbody>

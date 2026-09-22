@@ -169,12 +169,25 @@ class EnergyReading(db.Model):
     month = db.Column(db.String(7), nullable=False)  # "YYYY-MM"
     reading = db.Column(db.Float, nullable=False)
     kwh_rate = db.Column(db.Float, default=0.0)
+    payment_confirmed = db.Column(db.Boolean, default=False)
+    paid_at = db.Column(db.String(10), default="")  # YYYY-MM-DD
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     created_by = db.Column(db.String(120), default="")
 
     __table_args__ = (
         db.UniqueConstraint("space_name", "month", name="uq_energy_space_month"),
     )
+
+
+class EnergySetting(db.Model):
+    """Configuração única e persistente do valor do kWh (R$). Só muda quando
+    o gestor atualiza (ex.: reajuste da energia) — não depende do mês selecionado."""
+    __tablename__ = "energy_setting"
+
+    id = db.Column(db.Integer, primary_key=True)
+    kwh_rate = db.Column(db.Float, default=0.0)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = db.Column(db.String(120), default="")
 
 
 def seed_data():

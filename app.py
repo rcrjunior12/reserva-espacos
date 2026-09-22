@@ -1,6 +1,8 @@
 import os
 import io
+import re
 import zipfile
+import unicodedata
 from datetime import datetime, date, timedelta
 from functools import wraps
 
@@ -13,9 +15,11 @@ from flask_login import (
 )
 from werkzeug.utils import secure_filename
 from sqlalchemy import inspect, text
+from fpdf import FPDF
 
 from models import (
-    db, User, Space, Ministry, Reservation, RecurringBooking, MonthlyBill, EnergyReading, seed_data,
+    db, User, Space, Ministry, Reservation, RecurringBooking, MonthlyBill,
+    EnergyReading, EnergySetting, seed_data,
     FORMAS_PAGAMENTO, STATUS_RESERVA, BILLING_TYPES, STATUS_RECORRENTE, DIAS_SEMANA, ENERGY_SPACES
 )
 
@@ -47,6 +51,12 @@ def load_user(user_id):
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def slugify(text_value):
+    """Remove acentos e espaços para gerar um nome de arquivo seguro."""
+    normalizado = unicodedata.normalize("NFKD", text_value).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^A-Za-z0-9]+", "-", normalizado).strip("-").lower()
 
 
 # ---------- Auth ----------
@@ -1205,11 +1215,10 @@ def energia_view():
     leituras_mes = {
         r.space_name: r for r in EnergyReading.query.filter_by(month=mes_selecionado).all()
     }
-    if leituras_mes:
-        kwh_rate_atual = next(iter(leituras_mes.values())).kwh_rate
-    else:
-        ultima = EnergyReading.query.order_by(EnergyReading.month.desc(), EnergyReading.created_at.desc()).first()
-        kwh_rate_atual = ultima.kwh_rate if ultima else 0.0
+    # O valor do kWh é uma configuração fixa (só muda quando há reajuste de energia),
+    # independente do mês sendo visualizado ou de já ter leituras lançadas nele.
+    setting = EnergySetting.query.get(1)
+    kwh_rate_atual = setting.kwh_rate if setting else 0.0
 
     tabela = []
     for nome in ENERGY_SPACES:
@@ -1219,7 +1228,8 @@ def energia_view():
             anterior = EnergyReading.query.filter_by(space_name=nome, month=mes_adjacente(mes, -1)).first()
             kwh = None
             custo = None
-            if atual and anterior:
+            tem_dados = bool(atual and anterior)
+            if tem_dados:
                 kwh = atual.reading - anterior.reading
                 custo = kwh * (atual.kwh_rate or 0)
             linhas.append({
@@ -1228,6 +1238,11 @@ def energia_view():
                 "leitura": atual.reading if atual else None,
                 "kwh": kwh,
                 "custo": custo,
+                "tem_dados": tem_dados,
+                "pago": atual.payment_confirmed if atual else False,
+                "paid_at": atual.paid_at if atual else "",
+                "pdf_url": url_for("energia_conta_pdf", space_name=nome, mes=mes) if tem_dados else None,
+                "pagar_url": url_for("energia_conta_pagar", space_name=nome, mes=mes) if tem_dados else None,
             })
         tabela.append({
             "nome": nome,
@@ -1258,6 +1273,16 @@ def energia_salvar():
 
     kwh_rate = float((request.form.get("kwh_rate") or "0").replace(",", "."))
 
+    # O valor do kWh é salvo como configuração fixa, sempre — mesmo que nenhuma
+    # leitura de espaço seja informada nesta submissão. Só muda quando o gestor
+    # atualizar de novo (reajuste de energia).
+    setting = EnergySetting.query.get(1)
+    if not setting:
+        setting = EnergySetting(id=1)
+        db.session.add(setting)
+    setting.kwh_rate = kwh_rate
+    setting.updated_by = current_user.name
+
     salvos = 0
     for nome in ENERGY_SPACES:
         valor = request.form.get(f"reading_{nome}", "").strip().replace(",", ".")
@@ -1280,12 +1305,92 @@ def energia_salvar():
             ))
         salvos += 1
 
+    db.session.commit()
     if salvos:
-        db.session.commit()
-        flash(f"Medições de {mes_label(mes)} salvas ({salvos} espaço(s)).", "success")
+        flash(f"Medições de {mes_label(mes)} salvas ({salvos} espaço(s)). Valor do kWh: R$ {kwh_rate:.4f}.", "success")
     else:
-        flash("Nenhuma medição informada.", "warning")
+        flash(f"Valor do kWh atualizado para R$ {kwh_rate:.4f}.", "info")
     return redirect(url_for("energia_view", mes=mes))
+
+
+def calcular_conta_energia(space_name, mes):
+    """Retorna os dados da conta de um espaço/mês (leitura anterior, atual,
+    consumo e custo), ou None se não houver leitura do mês e do mês anterior."""
+    atual = EnergyReading.query.filter_by(space_name=space_name, month=mes).first()
+    anterior = EnergyReading.query.filter_by(space_name=space_name, month=mes_adjacente(mes, -1)).first()
+    if not atual or not anterior:
+        return None
+    kwh = atual.reading - anterior.reading
+    custo = kwh * (atual.kwh_rate or 0)
+    return {
+        "atual": atual,
+        "anterior": anterior,
+        "kwh": kwh,
+        "custo": custo,
+    }
+
+
+@app.route("/energia/conta/<string:space_name>/<string:mes>/pdf")
+@login_required
+def energia_conta_pdf(space_name, mes):
+    if space_name not in ENERGY_SPACES:
+        abort(404)
+    conta = calcular_conta_energia(space_name, mes)
+    if not conta:
+        flash("Não há leitura do mês e do mês anterior suficientes para gerar essa conta.", "danger")
+        return redirect(url_for("energia_view", mes=mes))
+
+    atual = conta["atual"]
+    anterior = conta["anterior"]
+
+    pdf = FPDF(format="A5")
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, f"Energia {space_name}", ln=1)
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 8, f"Referencia: {mes_label(mes)}", ln=1)
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 8, f"Leitura anterior ({mes_label(mes_adjacente(mes, -1))}): {anterior.reading:.1f} kWh", ln=1)
+    pdf.cell(0, 8, f"Leitura atual ({mes_label(mes)}): {atual.reading:.1f} kWh", ln=1)
+    pdf.cell(0, 8, f"Consumo do mes: {conta['kwh']:.1f} kWh", ln=1)
+    pdf.cell(0, 8, f"Valor do kWh: R$ {atual.kwh_rate:.4f}", ln=1)
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, f"Total a pagar: R$ {conta['custo']:.2f}", ln=1)
+    pdf.ln(2)
+
+    pdf.set_font("Helvetica", "", 10)
+    if atual.payment_confirmed:
+        pdf.cell(0, 8, f"Status: PAGO em {atual.paid_at}", ln=1)
+    else:
+        pdf.cell(0, 8, "Status: PENDENTE", ln=1)
+
+    pdf_bytes = bytes(pdf.output())
+    buf = io.BytesIO(pdf_bytes)
+    buf.seek(0)
+    filename = f"energia-{slugify(space_name)}-{mes}.pdf"
+    return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
+@app.route("/energia/conta/<string:space_name>/<string:mes>/pagar", methods=["POST"])
+@login_required
+def energia_conta_pagar(space_name, mes):
+    if space_name not in ENERGY_SPACES:
+        abort(404)
+    conta = calcular_conta_energia(space_name, mes)
+    if not conta:
+        flash("Não há leitura suficiente para dar baixa nessa conta.", "danger")
+    elif conta["atual"].payment_confirmed:
+        flash("Esta conta já estava marcada como paga.", "info")
+    else:
+        conta["atual"].payment_confirmed = True
+        conta["atual"].paid_at = date.today().isoformat()
+        db.session.commit()
+        flash(f"Conta de {space_name} ({mes_label(mes)}) marcada como paga.", "success")
+    return redirect(request.referrer or url_for("energia_view", mes=mes))
 
 
 # ---------- Conta ----------
@@ -1448,6 +1553,14 @@ def run_light_migrations():
         with db.engine.connect() as conn:
             if "encerrada_em" not in cols:
                 conn.execute(text("ALTER TABLE recurring_booking ADD COLUMN encerrada_em VARCHAR(10) DEFAULT ''"))
+            conn.commit()
+    if inspector.has_table("energy_reading"):
+        cols = {c["name"] for c in inspector.get_columns("energy_reading")}
+        with db.engine.connect() as conn:
+            if "payment_confirmed" not in cols:
+                conn.execute(text("ALTER TABLE energy_reading ADD COLUMN payment_confirmed BOOLEAN DEFAULT 0"))
+            if "paid_at" not in cols:
+                conn.execute(text("ALTER TABLE energy_reading ADD COLUMN paid_at VARCHAR(10) DEFAULT ''"))
             conn.commit()
 
 
