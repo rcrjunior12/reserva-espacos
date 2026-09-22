@@ -1243,6 +1243,7 @@ def energia_view():
                 "paid_at": atual.paid_at if atual else "",
                 "pdf_url": url_for("energia_conta_pdf", space_name=nome, mes=mes) if tem_dados else None,
                 "pagar_url": url_for("energia_conta_pagar", space_name=nome, mes=mes) if tem_dados else None,
+                "editar_url": url_for("energia_leitura_editar", space_name=nome, mes=mes),
             })
         tabela.append({
             "nome": nome,
@@ -1311,6 +1312,47 @@ def energia_salvar():
     else:
         flash(f"Valor do kWh atualizado para R$ {kwh_rate:.4f}.", "info")
     return redirect(url_for("energia_view", mes=mes))
+
+
+@app.route("/energia/leitura/<string:space_name>/<string:mes>", methods=["POST"])
+@login_required
+def energia_leitura_editar(space_name, mes):
+    """Lança ou corrige a leitura de um espaço/mês direto pela tabela de histórico,
+    sem precisar navegar até aquele mês no formulário do topo."""
+    if space_name not in ENERGY_SPACES:
+        abort(404)
+    try:
+        ano_ref, mes_ref = (int(x) for x in mes.split("-"))
+        date(ano_ref, mes_ref, 1)
+    except (ValueError, TypeError):
+        flash("Mês inválido.", "danger")
+        return redirect(url_for("energia_view"))
+
+    valor = request.form.get("reading", "").strip().replace(",", ".")
+    if valor == "":
+        flash("Informe um valor de leitura.", "warning")
+        return redirect(request.referrer or url_for("energia_view", mes=mes))
+    try:
+        leitura = float(valor)
+    except ValueError:
+        flash("Valor de leitura inválido.", "danger")
+        return redirect(request.referrer or url_for("energia_view", mes=mes))
+
+    existente = EnergyReading.query.filter_by(space_name=space_name, month=mes).first()
+    if existente:
+        existente.reading = leitura
+        existente.created_by = current_user.name
+        flash(f"Leitura de {space_name} em {mes_label(mes)} corrigida.", "success")
+    else:
+        setting = EnergySetting.query.get(1)
+        kwh_rate = setting.kwh_rate if setting else 0.0
+        db.session.add(EnergyReading(
+            space_name=space_name, month=mes, reading=leitura, kwh_rate=kwh_rate,
+            created_by=current_user.name,
+        ))
+        flash(f"Leitura de {space_name} em {mes_label(mes)} lançada.", "success")
+    db.session.commit()
+    return redirect(request.referrer or url_for("energia_view", mes=mes))
 
 
 def calcular_conta_energia(space_name, mes):

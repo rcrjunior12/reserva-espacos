@@ -68,10 +68,21 @@
             <tr><th>Mês</th><th>Leitura</th><th>kWh</th><th>Custo</th><th>Status</th><th></th></tr>
           </thead>
           <tbody>
+            {% set outer = loop.index0 %}
             {% for linha in item.linhas %}
+            {% set rid = outer ~ '-' ~ loop.index0 %}
             <tr>
               <td>{{ linha.mes_label }}</td>
-              <td>{{ linha.leitura if linha.leitura is not none else '—' }}</td>
+              <td>
+                <span id="leitura-view-{{ rid }}">{{ linha.leitura if linha.leitura is not none else '—' }}</span>
+                <form method="post" action="{{ linha.editar_url }}" id="leitura-form-{{ rid }}" class="d-none align-items-center gap-1">
+                  <input type="text" name="reading" class="form-control form-control-sm" style="width:80px;"
+                         value="{{ linha.leitura if linha.leitura is not none else '' }}" inputmode="decimal">
+                  <button type="submit" class="btn btn-sm btn-outline-success" title="Salvar"><i class="bi bi-check2"></i></button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" title="Cancelar"
+                          onclick="toggleEditarLeitura('{{ rid }}')"><i class="bi bi-x"></i></button>
+                </form>
+              </td>
               <td>{{ '%.1f'|format(linha.kwh) if linha.kwh is not none else '—' }}</td>
               <td>{{ 'R$ %.2f'|format(linha.custo) if linha.custo is not none else '—' }}</td>
               <td>
@@ -86,6 +97,10 @@
                 {% endif %}
               </td>
               <td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Editar leitura"
+                        onclick="toggleEditarLeitura('{{ rid }}')" id="leitura-btn-{{ rid }}">
+                  <i class="bi bi-pencil"></i>
+                </button>
                 {% if linha.tem_dados %}
                 <a href="{{ linha.pdf_url }}" class="btn btn-sm btn-outline-secondary" title="Gerar conta em PDF">
                   <i class="bi bi-file-earmark-pdf"></i>
@@ -109,4 +124,20 @@
   </div>
   {% endfor %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleEditarLeitura(rid) {
+  var view = document.getElementById('leitura-view-' + rid);
+  var form = document.getElementById('leitura-form-' + rid);
+  var abrindo = form.classList.contains('d-none');
+  form.classList.toggle('d-none', !abrindo);
+  form.classList.toggle('d-flex', abrindo);
+  view.classList.toggle('d-none', abrindo);
+  if (abrindo) {
+    form.querySelector('input[name="reading"]').focus();
+  }
+}
+</script>
 {% endblock %}
