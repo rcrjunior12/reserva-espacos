@@ -1,10 +1,12 @@
 import os
+import io
+import zipfile
 from datetime import datetime, date, timedelta
 from functools import wraps
 
 from flask import (
     Flask, render_template, redirect, url_for, request, flash, jsonify,
-    send_from_directory, abort
+    send_from_directory, send_file, abort
 )
 from flask_login import (
     LoginManager, login_user, logout_user, login_required, current_user
@@ -13,8 +15,8 @@ from werkzeug.utils import secure_filename
 from sqlalchemy import inspect, text
 
 from models import (
-    db, User, Space, Ministry, Reservation, RecurringBooking, MonthlyBill, seed_data,
-    FORMAS_PAGAMENTO, STATUS_RESERVA, BILLING_TYPES, STATUS_RECORRENTE, DIAS_SEMANA
+    db, User, Space, Ministry, Reservation, RecurringBooking, MonthlyBill, EnergyReading, seed_data,
+    FORMAS_PAGAMENTO, STATUS_RESERVA, BILLING_TYPES, STATUS_RECORRENTE, DIAS_SEMANA, ENERGY_SPACES
 )
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -659,6 +661,31 @@ def uploaded_file(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 
+@app.route("/backup")
+@login_required
+def backup_download():
+    """Gera e baixa um zip com o banco de dados (todas as reservas, cobranças etc.)
+    e os comprovantes de pagamento anexados. Útil pra guardar uma cópia de segurança
+    fora do servidor de vez em quando."""
+    db_uri = app.config["SQLALCHEMY_DATABASE_URI"]
+    db_path = db_uri.replace("sqlite:///", "", 1) if db_uri.startswith("sqlite:///") else None
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        if db_path and os.path.exists(db_path):
+            zf.write(db_path, arcname="reservas.db")
+        upload_folder = app.config["UPLOAD_FOLDER"]
+        if os.path.isdir(upload_folder):
+            for nome_arquivo in os.listdir(upload_folder):
+                caminho = os.path.join(upload_folder, nome_arquivo)
+                if os.path.isfile(caminho):
+                    zf.write(caminho, arcname=f"uploads/{nome_arquivo}")
+    buf.seek(0)
+
+    filename = f"backup-patio-{date.today().isoformat()}.zip"
+    return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/zip")
+
+
 # ---------- Espaços ----------
 
 @app.route("/espacos")
@@ -801,10 +828,24 @@ def ministerio_excluir(ministry_id):
 @login_required
 def recorrentes_list():
     topup_recurring_bookings()
-    recorrentes = RecurringBooking.query.order_by(
-        RecurringBooking.status.asc(), RecurringBooking.requester_name.asc()
-    ).all()
-    return render_template("recorrentes_list.html", recorrentes=recorrentes)
+    aba = request.args.get("aba", "ativas")
+    if aba == "encerradas":
+        recorrentes = (
+            RecurringBooking.query.filter_by(status="Encerrada")
+            .order_by(RecurringBooking.encerrada_em.desc(), RecurringBooking.requester_name.asc())
+            .all()
+        )
+    else:
+        recorrentes = (
+            RecurringBooking.query.filter(RecurringBooking.status != "Encerrada")
+            .order_by(RecurringBooking.status.asc(), RecurringBooking.requester_name.asc())
+            .all()
+        )
+    total_encerradas = RecurringBooking.query.filter_by(status="Encerrada").count()
+    return render_template(
+        "recorrentes_list.html", recorrentes=recorrentes, aba=aba,
+        status_options=STATUS_RECORRENTE, total_encerradas=total_encerradas,
+    )
 
 
 @app.route("/recorrentes/nova", methods=["GET", "POST"])
@@ -893,37 +934,72 @@ def recorrente_detail(recorrente_id):
     return render_template(
         "recorrente_detail.html", recurring=recurring,
         proximas=proximas, passadas=passadas, bills=bills,
+        status_options=STATUS_RECORRENTE,
     )
 
 
-@app.route("/recorrentes/<int:recorrente_id>/encerrar", methods=["POST"])
+@app.route("/recorrentes/<int:recorrente_id>/status", methods=["POST"])
 @login_required
-def recorrente_encerrar(recorrente_id):
+def recorrente_status(recorrente_id):
     recurring = RecurringBooking.query.get_or_404(recorrente_id)
-    recurring.status = "Encerrada"
-    hoje = date.today().isoformat()
-    mes_atual = date.today().strftime("%Y-%m")
+    novo_status = request.form.get("status", "")
+    if novo_status not in STATUS_RECORRENTE:
+        flash("Status inválido.", "danger")
+        return redirect(request.referrer or url_for("recorrentes_list"))
 
-    canceladas = 0
-    for r in recurring.reservations:
-        if r.date >= hoje and r.status != "Cancelada":
-            r.status = "Cancelada"
-            canceladas += 1
+    status_anterior = recurring.status
+    recurring.status = novo_status
 
-    # Cobranças de meses que não vão mais acontecer não devem continuar pendentes.
-    # Preserva o mês atual (pode ter ocorrências já realizadas a cobrar) e qualquer fatura já paga.
-    faturas_removidas = 0
-    for bill in list(recurring.bills):
-        if bill.month > mes_atual and not bill.payment_confirmed:
-            db.session.delete(bill)
-            faturas_removidas += 1
+    if novo_status == "Encerrada":
+        recurring.encerrada_em = date.today().isoformat()
+        hoje = date.today().isoformat()
+        mes_atual = date.today().strftime("%Y-%m")
 
+        canceladas = 0
+        for r in recurring.reservations:
+            if r.date >= hoje and r.status != "Cancelada":
+                r.status = "Cancelada"
+                canceladas += 1
+
+        # Cobranças de meses que não vão mais acontecer não devem continuar pendentes.
+        # Preserva o mês atual (pode ter ocorrências já realizadas a cobrar) e qualquer fatura já paga.
+        faturas_removidas = 0
+        for bill in list(recurring.bills):
+            if bill.month > mes_atual and not bill.payment_confirmed:
+                db.session.delete(bill)
+                faturas_removidas += 1
+
+        db.session.commit()
+        msg = f"Reserva fixa encerrada. {canceladas} ocorrência(s) futuras foram canceladas."
+        if faturas_removidas:
+            msg += f" {faturas_removidas} cobrança(s) futura(s) pendente(s) foram removidas."
+        flash(msg, "info")
+    else:
+        if status_anterior == "Encerrada" and novo_status != "Encerrada":
+            recurring.encerrada_em = ""
+        db.session.commit()
+        flash("Status atualizado.", "success")
+
+    return redirect(request.referrer or url_for("recorrentes_list"))
+
+
+@app.route("/recorrentes/<int:recorrente_id>/excluir", methods=["POST"])
+@login_required
+def recorrente_excluir(recorrente_id):
+    recurring = RecurringBooking.query.get_or_404(recorrente_id)
+    if recurring.status != "Encerrada":
+        flash("Só é possível excluir permanentemente reservas fixas encerradas.", "danger")
+        return redirect(url_for("recorrente_detail", recorrente_id=recurring.id))
+
+    nome = recurring.requester_name
+    for r in list(recurring.reservations):
+        db.session.delete(r)
+    for b in list(recurring.bills):
+        db.session.delete(b)
+    db.session.delete(recurring)
     db.session.commit()
-    msg = f"Reserva fixa encerrada. {canceladas} ocorrência(s) futuras foram canceladas."
-    if faturas_removidas:
-        msg += f" {faturas_removidas} cobrança(s) futura(s) pendente(s) foram removidas."
-    flash(msg, "info")
-    return redirect(url_for("recorrente_detail", recorrente_id=recurring.id))
+    flash(f"Reserva fixa de {nome} excluída permanentemente.", "info")
+    return redirect(url_for("recorrentes_list", aba="encerradas"))
 
 
 @app.route("/cobrancas")
@@ -1110,6 +1186,108 @@ def fatura_pagar(recorrente_id, bill_id):
     )
 
 
+# ---------- Consumo de Energia ----------
+
+@app.route("/energia")
+@login_required
+def energia_view():
+    mes_atual = date.today().strftime("%Y-%m")
+    mes_selecionado = request.args.get("mes", mes_atual)
+    try:
+        ano_ref, mes_ref = (int(x) for x in mes_selecionado.split("-"))
+        date(ano_ref, mes_ref, 1)
+    except (ValueError, TypeError):
+        mes_selecionado = mes_atual
+
+    # últimos 3 meses a exibir no histórico de cada espaço, terminando no mês selecionado
+    meses_historico = [mes_adjacente(mes_selecionado, -i) for i in range(2, -1, -1)]
+
+    leituras_mes = {
+        r.space_name: r for r in EnergyReading.query.filter_by(month=mes_selecionado).all()
+    }
+    if leituras_mes:
+        kwh_rate_atual = next(iter(leituras_mes.values())).kwh_rate
+    else:
+        ultima = EnergyReading.query.order_by(EnergyReading.month.desc(), EnergyReading.created_at.desc()).first()
+        kwh_rate_atual = ultima.kwh_rate if ultima else 0.0
+
+    tabela = []
+    for nome in ENERGY_SPACES:
+        linhas = []
+        for mes in meses_historico:
+            atual = EnergyReading.query.filter_by(space_name=nome, month=mes).first()
+            anterior = EnergyReading.query.filter_by(space_name=nome, month=mes_adjacente(mes, -1)).first()
+            kwh = None
+            custo = None
+            if atual and anterior:
+                kwh = atual.reading - anterior.reading
+                custo = kwh * (atual.kwh_rate or 0)
+            linhas.append({
+                "mes": mes,
+                "mes_label": mes_label(mes),
+                "leitura": atual.reading if atual else None,
+                "kwh": kwh,
+                "custo": custo,
+            })
+        tabela.append({
+            "nome": nome,
+            "linhas": linhas,
+            "leitura_atual": leituras_mes.get(nome).reading if nome in leituras_mes else "",
+        })
+
+    return render_template(
+        "energia.html", tabela=tabela,
+        mes_selecionado=mes_selecionado, mes_atual=mes_atual,
+        mes_selecionado_label=mes_label(mes_selecionado),
+        mes_anterior=mes_adjacente(mes_selecionado, -1),
+        mes_seguinte=mes_adjacente(mes_selecionado, 1),
+        kwh_rate_atual=kwh_rate_atual,
+    )
+
+
+@app.route("/energia/salvar", methods=["POST"])
+@login_required
+def energia_salvar():
+    mes = request.form.get("mes", date.today().strftime("%Y-%m"))
+    try:
+        ano_ref, mes_ref = (int(x) for x in mes.split("-"))
+        date(ano_ref, mes_ref, 1)
+    except (ValueError, TypeError):
+        flash("Mês inválido.", "danger")
+        return redirect(url_for("energia_view"))
+
+    kwh_rate = float((request.form.get("kwh_rate") or "0").replace(",", "."))
+
+    salvos = 0
+    for nome in ENERGY_SPACES:
+        valor = request.form.get(f"reading_{nome}", "").strip().replace(",", ".")
+        if valor == "":
+            continue
+        try:
+            leitura = float(valor)
+        except ValueError:
+            flash(f"Valor de medição inválido para {nome}, foi ignorado.", "warning")
+            continue
+        existente = EnergyReading.query.filter_by(space_name=nome, month=mes).first()
+        if existente:
+            existente.reading = leitura
+            existente.kwh_rate = kwh_rate
+            existente.created_by = current_user.name
+        else:
+            db.session.add(EnergyReading(
+                space_name=nome, month=mes, reading=leitura, kwh_rate=kwh_rate,
+                created_by=current_user.name,
+            ))
+        salvos += 1
+
+    if salvos:
+        db.session.commit()
+        flash(f"Medições de {mes_label(mes)} salvas ({salvos} espaço(s)).", "success")
+    else:
+        flash("Nenhuma medição informada.", "warning")
+    return redirect(url_for("energia_view", mes=mes))
+
+
 # ---------- Conta ----------
 
 @app.route("/conta/senha", methods=["GET", "POST"])
@@ -1264,6 +1442,12 @@ def run_light_migrations():
                 conn.execute(text("ALTER TABLE ministry ADD COLUMN leader_name VARCHAR(120) DEFAULT ''"))
             if "leader_whatsapp" not in cols:
                 conn.execute(text("ALTER TABLE ministry ADD COLUMN leader_whatsapp VARCHAR(30) DEFAULT ''"))
+            conn.commit()
+    if inspector.has_table("recurring_booking"):
+        cols = {c["name"] for c in inspector.get_columns("recurring_booking")}
+        with db.engine.connect() as conn:
+            if "encerrada_em" not in cols:
+                conn.execute(text("ALTER TABLE recurring_booking ADD COLUMN encerrada_em VARCHAR(10) DEFAULT ''"))
             conn.commit()
 
 

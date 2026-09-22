@@ -8,7 +8,8 @@ db = SQLAlchemy()
 FORMAS_PAGAMENTO = ["Dinheiro", "PIX", "Cartão de crédito", "Cartão de débito", "Transferência bancária", "Outro"]
 STATUS_RESERVA = ["Confirmada", "Pendente", "Cancelada"]
 BILLING_TYPES = ["Gratuita", "Mensal"]
-STATUS_RECORRENTE = ["Ativa", "Encerrada"]
+STATUS_RECORRENTE = ["Ativa", "Suspensa", "Encerrada"]
+ENERGY_SPACES = ["Salão de Beleza", "Barbearia", "Cafeteria", "Pizzaria", "Açaiteria"]
 DIAS_SEMANA = [
     ("0", "Segunda"), ("1", "Terça"), ("2", "Quarta"), ("3", "Quinta"),
     ("4", "Sexta"), ("5", "Sábado"), ("6", "Domingo"),
@@ -117,7 +118,8 @@ class RecurringBooking(db.Model):
     monthly_value = db.Column(db.Float, default=0.0)
     payment_method = db.Column(db.String(50), default="")
 
-    status = db.Column(db.String(20), default="Ativa")  # Ativa | Encerrada
+    status = db.Column(db.String(20), default="Ativa")  # Ativa | Suspensa | Encerrada
+    encerrada_em = db.Column(db.String(10), default="")  # YYYY-MM-DD, para ordenar a aba de encerradas
     notes = db.Column(db.Text, default="")
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -157,6 +159,22 @@ class MonthlyBill(db.Model):
     notes = db.Column(db.Text, default="")
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class EnergyReading(db.Model):
+    __tablename__ = "energy_reading"
+
+    id = db.Column(db.Integer, primary_key=True)
+    space_name = db.Column(db.String(80), nullable=False)  # um dos ENERGY_SPACES
+    month = db.Column(db.String(7), nullable=False)  # "YYYY-MM"
+    reading = db.Column(db.Float, nullable=False)
+    kwh_rate = db.Column(db.Float, default=0.0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.Column(db.String(120), default="")
+
+    __table_args__ = (
+        db.UniqueConstraint("space_name", "month", name="uq_energy_space_month"),
+    )
 
 
 def seed_data():

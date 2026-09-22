@@ -28,6 +28,7 @@
         <li class="nav-item"><a class="nav-link" href="{{ url_for('reservas_anteriores') }}"><i class="bi bi-clock-history me-1"></i>Histórico</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('recorrentes_list') }}"><i class="bi bi-arrow-repeat me-1"></i>Fixas</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('cobrancas_list') }}"><i class="bi bi-receipt me-1"></i>Cobranças</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('energia_view') }}"><i class="bi bi-lightning-charge me-1"></i>Energia</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('espacos_list') }}"><i class="bi bi-geo-alt me-1"></i>Espaços</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('ministerios_list') }}"><i class="bi bi-people me-1"></i>Ministérios</a></li>
       </ul>
@@ -39,6 +40,7 @@
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item" href="{{ url_for('usuarios_list') }}"><i class="bi bi-person-badge me-1"></i>Usuários</a></li>
             <li><a class="dropdown-item" href="{{ url_for('alterar_senha') }}"><i class="bi bi-key me-1"></i>Alterar senha</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('backup_download') }}"><i class="bi bi-download me-1"></i>Baixar backup</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right me-1"></i>Sair</a></li>
           </ul>

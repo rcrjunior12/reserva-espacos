@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Cobranças{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="fw-semibold mb-0"><i class="bi bi-receipt me-1"></i>Cobranças mensais</h5>
+</div>
+<p class="text-muted small mb-3">Todas as faturas mensais geradas pelas reservas fixas com mensalidade, de todos os responsáveis, num só lugar.</p>
+
+<div class="card p-3 mb-3">
+  <div class="btn-group btn-group-sm" role="group">
+    <a href="{{ url_for('faturas_list') }}" class="btn {{ 'btn-primary' if not status else 'btn-outline-primary' }}">Todas</a>
+    <a href="{{ url_for('faturas_list', status='pendente') }}" class="btn {{ 'btn-primary' if status == 'pendente' else 'btn-outline-primary' }}">Pendentes</a>
+    <a href="{{ url_for('faturas_list', status='paga') }}" class="btn {{ 'btn-primary' if status == 'paga' else 'btn-outline-primary' }}">Pagas</a>
+  </div>
+</div>
+
+<div class="card p-0">
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Responsável</th><th>Espaço</th><th>Mês</th><th>Valor</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in bills %}
+        <tr class="reserva-row">
+          <td>
+            <a href="{{ url_for('recorrente_detail', recorrente_id=b.recurring_booking.id) }}" class="text-decoration-none">{{ b.recurring_booking.requester_name }}</a>
+          </td>
+          <td><span class="badge-space" style="background:{{ b.recurring_booking.space.color }}"></span>{{ b.recurring_booking.space.name }}</td>
+          <td>{{ b.month }}</td>
+          <td>R$ {{ '%.2f'|format(b.value) }}</td>
+          <td>
+            {% if b.payment_confirmed %}
+              <span class="badge text-bg-success">Paga em {{ b.paid_at }}</span>
+            {% else %}
+              <span class="badge text-bg-warning">Pendente</span>
+            {% endif %}
+            {% if b.payment_proof_filename %}
+            <a href="{{ url_for('uploaded_file', filename=b.payment_proof_filename) }}" target="_blank" class="ms-1"><i class="bi bi-paperclip"></i></a>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <a href="{{ url_for('fatura_pagar', recorrente_id=b.recurring_booking.id, bill_id=b.id) }}" class="btn btn-sm btn-outline-primary">
+              {{ 'Editar' if b.payment_confirmed else 'Dar baixa' }}
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% if not bills %}
+<p class="text-muted mt-3">Nenhuma fatura encontrada.</p>
+{% endif %}
+{% endblock %}

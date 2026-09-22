@@ -6,15 +6,18 @@
     <div>
       <span class="badge-space" style="background:{{ recurring.space.color }}"></span>
       <span class="fs-5 fw-semibold">{{ recurring.requester_name }}</span>
-      {% if recurring.status == 'Ativa' %}<span class="badge text-bg-success ms-2">Ativa</span>
-      {% else %}<span class="badge text-bg-secondary ms-2">Encerrada</span>{% endif %}
+      {% if recurring.status == 'Encerrada' and recurring.encerrada_em %}
+      <span class="text-muted small ms-2">encerrada em {{ recurring.encerrada_em }}</span>
+      {% endif %}
     </div>
-    {% if recurring.status == 'Ativa' %}
-    <form method="post" action="{{ url_for('recorrente_encerrar', recorrente_id=recurring.id) }}"
-          onsubmit="return confirm('Encerrar esta reserva fixa? As ocorrências futuras ainda não realizadas serão canceladas e as cobranças pendentes de meses futuros serão removidas.');">
-      <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-x-circle me-1"></i>Encerrar</button>
+    <form method="post" action="{{ url_for('recorrente_status', recorrente_id=recurring.id) }}"
+          onsubmit="return this.querySelector('select').value !== 'Encerrada' || confirm('Encerrar esta reserva fixa? As ocorrências futuras ainda não realizadas serão canceladas e as cobranças pendentes de meses futuros serão removidas.');">
+      <select name="status" class="form-select form-select-sm" onchange="this.form.submit()" style="min-width:130px;">
+        {% for s in status_options %}
+        <option value="{{ s }}" {% if recurring.status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
     </form>
-    {% endif %}
   </div>
 
   <dl class="row mb-0 mt-3">
@@ -122,5 +125,13 @@
   </div>
 </div>
 
-<a href="{{ url_for('recorrentes_list') }}" class="btn btn-outline-secondary mt-3">Voltar</a>
+<div class="d-flex gap-2 mt-3">
+  <a href="{{ url_for('recorrentes_list') }}" class="btn btn-outline-secondary">Voltar</a>
+  {% if recurring.status == 'Encerrada' %}
+  <form method="post" action="{{ url_for('recorrente_excluir', recorrente_id=recurring.id) }}"
+        onsubmit="return confirm('Excluir permanentemente esta reserva fixa? Essa ação não pode ser desfeita.');">
+    <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash me-1"></i>Excluir permanentemente</button>
+  </form>
+  {% endif %}
+</div>
 {% endblock %}

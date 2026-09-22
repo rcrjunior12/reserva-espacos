@@ -7,18 +7,32 @@
 </div>
 <p class="text-muted small mb-3">Reservas que se repetem toda semana em dias e horários fixos — gratuitas (vinculadas a um ministério) ou com mensalidade.</p>
 
+<div class="btn-group btn-group-sm mb-3" role="group">
+  <a href="{{ url_for('recorrentes_list', aba='ativas') }}" class="btn {{ 'btn-primary' if aba != 'encerradas' else 'btn-outline-primary' }}">
+    <i class="bi bi-arrow-repeat me-1"></i>Ativas
+  </a>
+  <a href="{{ url_for('recorrentes_list', aba='encerradas') }}" class="btn {{ 'btn-primary' if aba == 'encerradas' else 'btn-outline-primary' }}">
+    <i class="bi bi-archive me-1"></i>Reservas Fixas Encerradas
+    {% if total_encerradas %}<span class="badge text-bg-light text-dark border ms-1">{{ total_encerradas }}</span>{% endif %}
+  </a>
+</div>
+
 <div class="card p-0">
   <div class="table-responsive">
     <table class="table align-middle mb-0">
       <thead class="table-light">
         <tr>
-          <th>Responsável</th><th>Espaço</th><th>Dias / Horário</th><th>Ministério</th><th>Tipo</th><th>Status</th><th></th>
+          <th>Responsável</th><th>Espaço</th><th>Dias / Horário</th><th>Ministério</th><th>Tipo</th>
+          <th>Status</th>
+          {% if aba == 'encerradas' %}<th>Encerrada em</th>{% endif %}
+          <th></th>
+          {% if aba == 'encerradas' %}<th></th>{% endif %}
         </tr>
       </thead>
       <tbody>
         {% for r in recorrentes %}
-        <tr class="reserva-row" onclick="window.location='{{ url_for('recorrente_detail', recorrente_id=r.id) }}'" style="cursor:pointer;">
-          <td>{{ r.requester_name }}</td>
+        <tr class="reserva-row">
+          <td><a href="{{ url_for('recorrente_detail', recorrente_id=r.id) }}" class="text-decoration-none">{{ r.requester_name }}</a></td>
           <td><span class="badge-space" style="background:{{ r.space.color }}"></span>{{ r.space.name }}</td>
           <td>{{ r.weekdays_labels()|join(', ') }}<br><small class="text-muted">{{ r.start_time }}-{{ r.end_time }}</small></td>
           <td>{{ r.ministry.name if r.ministry else '—' }}</td>
@@ -30,12 +44,27 @@
             {% endif %}
           </td>
           <td>
-            {% if r.status == 'Ativa' %}<span class="badge text-bg-success">Ativa</span>
-            {% else %}<span class="badge text-bg-secondary">Encerrada</span>{% endif %}
+            <form method="post" action="{{ url_for('recorrente_status', recorrente_id=r.id) }}" class="d-inline">
+              <select name="status" class="form-select form-select-sm"
+                      onchange="this.form.submit()" style="min-width:110px;">
+                {% for s in status_options %}
+                <option value="{{ s }}" {% if r.status == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+              </select>
+            </form>
           </td>
+          {% if aba == 'encerradas' %}<td>{{ r.encerrada_em or '—' }}</td>{% endif %}
           <td class="text-end">
-            <i class="bi bi-chevron-right text-muted"></i>
+            <a href="{{ url_for('recorrente_detail', recorrente_id=r.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-right"></i></a>
           </td>
+          {% if aba == 'encerradas' %}
+          <td class="text-end">
+            <form method="post" action="{{ url_for('recorrente_excluir', recorrente_id=r.id) }}"
+                  onsubmit="return confirm('Excluir permanentemente esta reserva fixa? Essa ação não pode ser desfeita.');">
+              <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+          </td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>
@@ -43,6 +72,8 @@
   </div>
 </div>
 {% if not recorrentes %}
-<p class="text-muted mt-3">Nenhuma reserva fixa cadastrada ainda.</p>
+<p class="text-muted mt-3">
+  {{ 'Nenhuma reserva fixa encerrada ainda.' if aba == 'encerradas' else 'Nenhuma reserva fixa ativa ou suspensa no momento.' }}
+</p>
 {% endif %}
 {% endblock %}
